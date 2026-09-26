@@ -14,6 +14,7 @@ pub struct BaseReasoningParser {
     buffer: String,
     stripped_think_start: bool,
     model_type: String,
+    tool_start_rules: Vec<(&'static str, Option<&'static str>)>,
 }
 
 impl BaseReasoningParser {
@@ -26,6 +27,7 @@ impl BaseReasoningParser {
             buffer: String::new(),
             stripped_think_start: false,
             model_type: "base".to_string(),
+            tool_start_rules: Vec::new(),
         }
     }
 
@@ -35,12 +37,56 @@ impl BaseReasoningParser {
         self
     }
 
-    /// Check if the current buffer is a prefix of one of the tokens.
-    fn is_partial_token(&self, text: &str) -> bool {
-        (self.config.think_start_token.starts_with(text) && self.config.think_start_token != text)
-            || (self.config.think_end_token.starts_with(text)
-                && self.config.think_end_token != text)
+    /// A tool opener may end reasoning without `</think>`. A following prefix
+    /// distinguishes real DSML calls from literal documentation markers.
+    pub fn with_tool_start_rule(
+        mut self,
+        marker: &'static str,
+        following: Option<&'static str>,
+    ) -> Self {
+        self.tool_start_rules.push((marker, following));
+        self
     }
+
+    fn tool_boundary(&self, text: &str) -> (Option<usize>, Option<usize>) {
+        let mut found = None;
+        let mut pending = None;
+        for &(marker, following) in &self.tool_start_rules {
+            for (index, _) in text.match_indices(marker) {
+                let tail = text[index + marker.len()..].trim_start();
+                if following.is_none_or(|prefix| tail.starts_with(prefix)) {
+                    found = Some(found.map_or(index, |old: usize| old.min(index)));
+                } else if following.is_some_and(|prefix| prefix.starts_with(tail)) {
+                    pending = Some(pending.map_or(index, |old: usize| old.min(index)));
+                }
+            }
+            if let Some(index) = partial_suffix(text, marker) {
+                pending = Some(pending.map_or(index, |old| old.min(index)));
+            }
+        }
+        (found, pending)
+    }
+
+    fn reasoning_end(&self, text: &str) -> Option<(usize, usize)> {
+        let explicit = text
+            .find(&self.config.think_end_token)
+            .map(|index| (index, self.config.think_end_token.len()));
+        let implicit = self.tool_boundary(text).0.map(|index| (index, 0));
+        explicit
+            .into_iter()
+            .chain(implicit)
+            .min_by_key(|(index, _)| *index)
+    }
+}
+
+/// Hold only a suffix that could become a complete marker in the next chunk.
+fn partial_suffix(text: &str, marker: &str) -> Option<usize> {
+    let earliest = text.len().saturating_sub(marker.len().saturating_sub(1));
+    text.char_indices()
+        .rev()
+        .take_while(|(index, _)| *index >= earliest)
+        .filter_map(|(index, _)| marker.starts_with(&text[index..]).then_some(index))
+        .min()
 }
 
 impl ReasoningParser for BaseReasoningParser {
@@ -56,90 +102,70 @@ impl ReasoningParser for BaseReasoningParser {
             return Ok(ParserResult::normal(text.to_string()));
         }
 
-        // The text is considered to be in a reasoning block.
-        let processed_text = text.replace(&self.config.think_start_token, "").to_string();
-
-        if !processed_text.contains(&self.config.think_end_token) {
-            // Assume reasoning was truncated before end token
-            return Ok(ParserResult::reasoning(processed_text));
+        if let Some((index, marker_len)) = self.reasoning_end(text) {
+            Ok(ParserResult::new(
+                text[index + marker_len..].to_string(),
+                text[..index].replace(&self.config.think_start_token, ""),
+            ))
+        } else {
+            Ok(ParserResult::reasoning(
+                text.replace(&self.config.think_start_token, ""),
+            ))
         }
-
-        // Extract reasoning content
-        let splits: Vec<&str> = processed_text
-            .splitn(2, &self.config.think_end_token)
-            .collect();
-        let reasoning_text = (*splits.first().unwrap_or(&"")).to_string();
-        let normal_text = splits.get(1).map(|s| s.to_string()).unwrap_or_default();
-
-        Ok(ParserResult::new(normal_text, reasoning_text))
     }
 
     fn parse_reasoning_streaming_incremental(
         &mut self,
         text: &str,
     ) -> Result<ParserResult, ParseError> {
-        // Check if adding this text would exceed buffer limit
         if self.buffer.len() + text.len() > self.config.max_buffer_size {
             return Err(ParseError::BufferOverflow(self.buffer.len() + text.len()));
         }
-
-        // Incrementally parse the streaming text
         self.buffer.push_str(text);
-        let mut current_text = self.buffer.clone();
-
-        // If the current text is a prefix of a token, keep buffering
-        if self.is_partial_token(&current_text) {
-            return Ok(ParserResult::default());
-        }
-
-        // Strip start token if present
-        if !self.stripped_think_start && current_text.contains(&self.config.think_start_token) {
-            current_text = current_text.replace(&self.config.think_start_token, "");
-            self.buffer.clone_from(&current_text);
+        if !self.stripped_think_start && self.buffer.contains(&self.config.think_start_token) {
+            // Do not strip think markers inside tool arguments.
+            let end = self
+                .reasoning_end(&self.buffer)
+                .map_or(self.buffer.len(), |(index, _)| index);
+            self.buffer = format!(
+                "{}{}",
+                self.buffer[..end].replace(&self.config.think_start_token, ""),
+                &self.buffer[end..]
+            );
             self.stripped_think_start = true;
             self.in_reasoning = true;
         }
-
-        // Handle end of reasoning block
-        let think_end_idx = if self.in_reasoning {
-            current_text
-                .find(&self.config.think_end_token)
-                .unwrap_or(current_text.len())
+        if self.in_reasoning {
+            if let Some((index, marker_len)) = self.reasoning_end(&self.buffer) {
+                let reasoning = self.buffer[..index].to_string();
+                let normal = self.buffer[index + marker_len..].to_string();
+                self.buffer.clear();
+                self.in_reasoning = false;
+                if marker_len == 0 {
+                    self.stripped_think_start = true;
+                }
+                return Ok(ParserResult::new(normal, reasoning));
+            }
+            if !self.config.stream_reasoning {
+                return Ok(ParserResult::default());
+            }
+            let pending = self.tool_boundary(&self.buffer).1;
+            let keep_from = pending
+                .into_iter()
+                .chain(partial_suffix(&self.buffer, &self.config.think_end_token))
+                .chain(partial_suffix(&self.buffer, &self.config.think_start_token))
+                .min()
+                .unwrap_or(self.buffer.len());
+            let reasoning = self.buffer[..keep_from].to_string();
+            self.buffer.drain(..keep_from);
+            Ok(ParserResult::reasoning(reasoning))
         } else {
-            current_text.len()
-        };
-
-        if self.in_reasoning && think_end_idx < current_text.len() {
-            let reasoning_text = &current_text[..think_end_idx];
-            self.buffer.clear();
-            self.in_reasoning = false;
-            let start_idx = think_end_idx + self.config.think_end_token.len();
-            let normal_text = if start_idx < current_text.len() {
-                &current_text[start_idx..]
-            } else {
-                ""
-            };
-            return Ok(ParserResult::new(
-                normal_text.to_string(),
-                reasoning_text.to_string(),
-            ));
-        }
-
-        // Continue with reasoning content
-        if self.in_reasoning && self.config.stream_reasoning {
-            // Stream the content immediately
-            let reasoning_text = current_text;
-            self.buffer.clear();
-            Ok(ParserResult::reasoning(reasoning_text))
-        } else if !self.in_reasoning {
-            // Return current_text (buffer included), not just `text`, so a buffered
-            // partial token followed by normal text is not dropped.
-            let normal_text = current_text;
-            self.buffer.clear();
-            Ok(ParserResult::normal(normal_text))
-        } else {
-            // If we are in a reasoning block but no end token is found, buffer it
-            Ok(ParserResult::default())
+            let keep_from = partial_suffix(&self.buffer, &self.config.think_start_token)
+                .or_else(|| partial_suffix(&self.buffer, &self.config.think_end_token))
+                .unwrap_or(self.buffer.len());
+            let normal = self.buffer[..keep_from].to_string();
+            self.buffer.drain(..keep_from);
+            Ok(ParserResult::normal(normal))
         }
     }
 

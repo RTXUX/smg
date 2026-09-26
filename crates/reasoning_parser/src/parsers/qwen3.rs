@@ -27,7 +27,9 @@ impl Qwen3Parser {
         };
 
         Self {
-            base: BaseReasoningParser::new(config).with_model_type("qwen3".to_string()),
+            base: BaseReasoningParser::new(config)
+                .with_model_type("qwen3".to_string())
+                .with_tool_start_rule("<tool_call>", None),
         }
     }
 }
@@ -94,7 +96,9 @@ impl QwenThinkingParser {
         };
 
         Self {
-            base: BaseReasoningParser::new(config).with_model_type("qwen_thinking".to_string()),
+            base: BaseReasoningParser::new(config)
+                .with_model_type("qwen_thinking".to_string())
+                .with_tool_start_rule("<tool_call>", None),
         }
     }
 }

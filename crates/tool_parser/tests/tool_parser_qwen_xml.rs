@@ -277,7 +277,7 @@ async fn test_qwen_xml_format_detection() {
     assert!(parser.has_tool_markers("<tool_call>"));
     assert!(parser.has_tool_markers("Some text <tool_call>"));
     assert!(!parser.has_tool_markers("Just plain text"));
-    assert!(!parser.has_tool_markers("<function=test>")); // Without tool_call tags
+    assert!(parser.has_tool_markers("<function=test>")); // Without tool_call tags
 }
 
 #[tokio::test]
@@ -768,25 +768,14 @@ async fn test_qwen_xml_many_parameters() {
 async fn test_qwen_xml_malformed_xml_missing_parameter_close() {
     let parser = QwenXmlParser::new();
 
-    // Missing </parameter> closing tag - parser regex won't match incomplete parameter
-    let input = r"<tool_call>
-<function=get_weather>
-<parameter=city>Beijing
-</function>
-</tool_call>";
-
-    let (normal_text, tools) = parser.parse_complete(input).await.unwrap();
-
-    // The parser extracts the tool call but with empty arguments since
-    // the parameter block is malformed (no </parameter>)
-    // This is acceptable behavior - we extract what we can
-    if tools.is_empty() {
-        // If no tools extracted, input returned as normal text
-        assert_eq!(normal_text, input);
-    } else {
-        // If tool extracted, it should have the function name
-        assert_eq!(tools[0].function.name, "get_weather");
-    }
+    // 7661150 closes the parameter at the function boundary.
+    let input =
+        "<tool_call>\n<function=get_weather>\n<parameter=city>Beijing\n</function>\n</tool_call>";
+    let (_, tools) = parser.parse_complete(input).await.unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].function.name, "get_weather");
+    let args: serde_json::Value = serde_json::from_str(&tools[0].function.arguments).unwrap();
+    assert_eq!(args, json!({"city": "Beijing"}));
 }
 
 #[tokio::test]
@@ -823,9 +812,8 @@ async fn test_qwen_xml_malformed_xml_nested_tool_calls() {
 
     let (_normal_text, tools) = parser.parse_complete(input).await.unwrap();
 
-    // Should handle gracefully - may parse first complete tool_call
-    // The exact behavior depends on regex matching
-    assert!(tools.len() <= 1);
+    // The nested opener closes the previous incomplete call (7661150).
+    assert_eq!(tools.len(), 2);
 }
 
 #[tokio::test]
@@ -1118,4 +1106,33 @@ async fn test_qwen_xml_preserves_indentation_at_every_stream_split() {
         expected
     );
     assert_streamed_arguments(input, &[("search", expected)], true).await;
+}
+
+/// 7661150: fences are closed at subsequent boundaries, not guessed at EOF.
+#[tokio::test]
+async fn test_qwen_xml_recovers_missing_fences_at_every_stream_split() {
+    for input in [
+        "<tool_call><function=get_weather><parameter=city>Boston<parameter=unit>celsius</function></tool_call>",
+        "<tool_call><function=get_weather><parameter=city>Boston<parameter=unit>celsius</tool_call>",
+        "<function=get_weather><parameter=city>Boston<parameter=unit>celsius</function>",
+    ] {
+        let expected = json!({"city": "Boston", "unit": "celsius"});
+        let (_, calls) = QwenXmlParser::new().parse_complete(input).await.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&calls[0].function.arguments).unwrap(), expected);
+        assert_streamed_arguments(input, &[("get_weather", expected)], true).await;
+    }
+    for input in [
+        "<tool_call><function=get_weather><parameter=city>Boston<function=get_weather><parameter=city>Orlando</function></tool_call>",
+        "<tool_call><function=get_weather><parameter=city>Boston<tool_call><function=get_weather><parameter=city>Orlando</function></tool_call>",
+        "<tool_call>\n<function=get_weather>\n<parameter=city>\nBoston\n<function=get_weather>\n<parameter=city>\nOrlando\n</function>\n</tool_call>",
+    ] {
+        let (_, calls) = QwenXmlParser::new().parse_complete(input).await.unwrap();
+        assert_eq!(calls.len(), 2);
+        let expected = [("get_weather", json!({"city": "Boston"})), ("get_weather", json!({"city": "Orlando"}))];
+        for (call, (_, args)) in calls.iter().zip(&expected) {
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&call.function.arguments).unwrap(), *args);
+        }
+        assert_streamed_arguments(input, &expected, true).await;
+    }
 }

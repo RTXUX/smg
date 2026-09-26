@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use async_trait::async_trait;
 use openai_protocol::common::Tool;
 use regex::Regex;
@@ -46,12 +48,106 @@ pub struct QwenXmlParser {
 
     /// XML format streaming state
     in_tool_call: bool,
+    awaiting_wrapper_close: bool,
     current_function_name: String,
     current_parameters: serde_json::Map<String, Value>,
 
     /// Precompiled regex patterns for XML format parsing
     xml_function_pattern: Regex,
     xml_param_pattern: Regex,
+}
+
+fn next_unclosed_xml_marker(tail: &str) -> Option<(&'static str, usize)> {
+    [
+        "<parameter=",
+        "</parameter>",
+        "</function>",
+        "<function=",
+        "</tool_call>",
+        "<tool_call>",
+    ]
+    .into_iter()
+    .filter_map(|marker| tail.find(marker).map(|idx| (marker, idx)))
+    .min_by_key(|(_, idx)| *idx)
+}
+
+/// Close missing XML fences at the next parameter, function or wrapper
+/// boundary. At EOF an unfinished value is held rather than invented.
+fn normalize_lenient_xml_block(block: &str) -> Cow<'_, str> {
+    let mut out = String::with_capacity(block.len());
+    let mut rest = block;
+    let mut changed = false;
+    let mut in_tool_call = false;
+    let mut in_function = false;
+    let mut in_parameter = false;
+
+    while !rest.is_empty() {
+        let Some((marker, idx)) = next_unclosed_xml_marker(rest) else {
+            out.push_str(rest);
+            break;
+        };
+
+        out.push_str(&rest[..idx]);
+        rest = &rest[idx..];
+
+        match marker {
+            "<parameter=" => {
+                if in_parameter {
+                    out.push_str("</parameter>");
+                    changed = true;
+                }
+                in_parameter = true;
+            }
+            "</parameter>" => in_parameter = false,
+            "</function>" => {
+                if in_parameter {
+                    out.push_str("</parameter>");
+                    in_parameter = false;
+                    changed = true;
+                }
+                in_function = false;
+            }
+            "<function=" => {
+                if in_parameter {
+                    out.push_str("</parameter>");
+                    in_parameter = false;
+                    changed = true;
+                }
+                if in_function {
+                    out.push_str("</function>");
+                    changed = true;
+                }
+                in_tool_call = true;
+                in_function = true;
+            }
+            "</tool_call>" | "<tool_call>" => {
+                if in_parameter {
+                    out.push_str("</parameter>");
+                    in_parameter = false;
+                    changed = true;
+                }
+                if in_function {
+                    out.push_str("</function>");
+                    in_function = false;
+                    changed = true;
+                }
+                if marker == "<tool_call>" && in_tool_call {
+                    out.push_str("</tool_call>");
+                    changed = true;
+                }
+                in_tool_call = marker == "<tool_call>";
+            }
+            _ => {}
+        }
+        out.push_str(marker);
+        rest = &rest[marker.len()..];
+    }
+
+    if changed {
+        Cow::Owned(out)
+    } else {
+        Cow::Borrowed(block)
+    }
 }
 
 /// Strip at most one structural line break at each edge of an XML value.
@@ -116,7 +212,7 @@ impl QwenXmlParser {
     )]
     pub fn new() -> Self {
         // Support XML format: <tool_call>\n<function=name>\n<parameter=key>value</parameter>\n</function>\n</tool_call>
-        let pattern = r"(?s)<tool_call>\s*(.*?)\s*</tool_call>";
+        let pattern = r"(?s)<function=[^>]+>.*?</function>";
         let extractor = Regex::new(pattern).expect("Valid regex pattern");
 
         // Precompile XML format regex patterns for performance
@@ -135,6 +231,7 @@ impl QwenXmlParser {
             tool_call_start_token: "<tool_call>",
             tool_call_end_token: "</tool_call>",
             in_tool_call: false,
+            awaiting_wrapper_close: false,
             current_function_name: String::new(),
             current_parameters: serde_json::Map::new(),
             xml_function_pattern,
@@ -284,13 +381,17 @@ impl QwenXmlParser {
         // Safe: has_tool_markers() already confirmed the marker exists
         let idx = text
             .find(self.tool_call_start_token)
+            .into_iter()
+            .chain(text.find("<function="))
+            .min()
             .ok_or_else(|| ParserError::ParsingFailed("tool call marker not found".to_string()))?;
         let normal_text = text[..idx].to_string();
 
-        // Extract tool calls
+        // Recover missing inner fences and complete bare functions.
+        let normalized = normalize_lenient_xml_block(text);
         let mut parsed = Vec::new();
-        for captures in self.extractor.captures_iter(text) {
-            if let Some(content_str) = captures.get(1) {
+        for captures in self.extractor.captures_iter(&normalized) {
+            if let Some(content_str) = captures.get(0) {
                 let content = content_str.as_str().trim();
 
                 match self.parse_xml_format(content, tools) {
@@ -347,6 +448,7 @@ impl ToolParser for QwenXmlParser {
         tools: &[Tool],
     ) -> ParserResult<StreamingParseResult> {
         self.buffer.push_str(chunk);
+        self.buffer = normalize_lenient_xml_block(&self.buffer).into_owned();
 
         let mut normal_text = String::new();
         let mut calls: Vec<ToolCallItem> = vec![];
@@ -355,31 +457,70 @@ impl ToolParser for QwenXmlParser {
         let tool_indices = helpers::get_tool_indices(tools);
 
         loop {
-            // If we're not in a tool call and don't see a start token, return normal text
-            if !self.in_tool_call && !self.buffer.contains(self.tool_call_start_token) {
-                // Check for partial start token
-                if helpers::ends_with_partial_token(&self.buffer, self.tool_call_start_token)
-                    .is_none()
-                {
-                    normal_text.push_str(&self.buffer);
-                    self.buffer.clear();
-                }
-                break;
-            }
-
-            // Look for tool call start
+            // A complete bare function is recoverable without an outer wrapper.
             if !self.in_tool_call {
-                if let Some(s) = self.buffer.find(self.tool_call_start_token) {
-                    normal_text.push_str(&self.buffer[..s]);
-                    self.buffer = self.buffer[s + self.tool_call_start_token.len()..].to_string();
-                    self.in_tool_call = true;
-                    self.current_tool_name_sent = false;
-                    self.current_function_name.clear();
-                    self.current_parameters.clear();
-                    continue;
-                } else {
-                    break;
+                if self.awaiting_wrapper_close {
+                    let tail = self.buffer.trim_start();
+                    if tail.starts_with(self.tool_call_end_token) {
+                        let end = self.buffer.len() - tail.len() + self.tool_call_end_token.len();
+                        self.buffer.drain(..end);
+                        self.awaiting_wrapper_close = false;
+                    } else if [
+                        self.tool_call_end_token,
+                        "<function=",
+                        self.tool_call_start_token,
+                    ]
+                    .into_iter()
+                    .any(|marker| marker.starts_with(tail))
+                    {
+                        break;
+                    } else if tail.starts_with("<function=")
+                        || tail.starts_with(self.tool_call_start_token)
+                    {
+                        let whitespace = self.buffer.len() - tail.len();
+                        self.buffer.drain(..whitespace);
+                        self.awaiting_wrapper_close = false;
+                    } else {
+                        self.awaiting_wrapper_close = false;
+                    }
                 }
+                let start = self
+                    .buffer
+                    .find(self.tool_call_start_token)
+                    .map(|index| (index, self.tool_call_start_token.len()))
+                    .into_iter()
+                    .chain(self.buffer.find("<function=").map(|index| (index, 0)))
+                    .min_by_key(|(index, _)| *index);
+                if let Some((index, marker_len)) = start {
+                    let prefix = &self.buffer[..index];
+                    if self.current_tool_id >= 0 {
+                        normal_text.push_str(&prefix.replace(self.tool_call_end_token, ""));
+                    } else {
+                        normal_text.push_str(prefix);
+                    }
+                    self.buffer.drain(..index + marker_len);
+                    self.in_tool_call = true;
+                    continue;
+                }
+                // Hold partial openers/closers across token and transport splits.
+                let keep_from = [
+                    self.tool_call_start_token,
+                    "<function=",
+                    self.tool_call_end_token,
+                ]
+                .into_iter()
+                .filter_map(|token| helpers::ends_with_partial_token(&self.buffer, token))
+                .map(|suffix| self.buffer.len() - suffix)
+                .min()
+                .unwrap_or(self.buffer.len());
+                let prefix = &self.buffer[..keep_from];
+                if self.current_tool_id >= 0 {
+                    normal_text.push_str(&prefix.replace(self.tool_call_end_token, ""));
+                } else {
+                    normal_text.push_str(prefix);
+                }
+                self.buffer.drain(..keep_from);
+                break;
             }
 
             // We're in a tool call, try to parse function name if not sent yet
@@ -418,10 +559,8 @@ impl ToolParser for QwenXmlParser {
                                 parameters: String::new(),
                             });
 
-                            // Remove processed function declaration from buffer
-                            // Safe: captures.get(0) always returns Some (group 0 is the entire match)
-                            self.buffer =
-                                self.buffer[captures.get(0).map_or(0, |m| m.end())..].to_string();
+                            // Keep the header so later boundary normalization can close
+                            // this function before a following function or wrapper.
                             continue;
                         } else {
                             // Invalid function name, reset state
@@ -440,13 +579,23 @@ impl ToolParser for QwenXmlParser {
 
             // Parse parameters (only complete ones)
             if self.current_tool_name_sent {
-                let end_pos = self.buffer.find(self.tool_call_end_token);
-                let parameter_end = end_pos.unwrap_or(self.buffer.len());
+                let end_pos = self
+                    .buffer
+                    .find("</function>")
+                    .map(|index| (index, "</function>".len()))
+                    .into_iter()
+                    .chain(
+                        self.buffer
+                            .find(self.tool_call_end_token)
+                            .map(|index| (index, self.tool_call_end_token.len())),
+                    )
+                    .min_by_key(|(index, _)| *index);
+                let parameter_end = end_pos.map_or(self.buffer.len(), |(index, _)| index);
                 let param_calls = self.parse_and_stream_parameters(tools, parameter_end);
                 calls.extend(param_calls);
 
                 // Check if tool call is complete
-                if let Some(end_pos) = end_pos {
+                if let Some((end_pos, marker_len)) = end_pos {
                     // Parameter fragments leave the root open; braces in values are data.
                     let current_args =
                         &mut self.streamed_args_for_tool[self.current_tool_id as usize];
@@ -459,9 +608,9 @@ impl ToolParser for QwenXmlParser {
                     current_args.push_str(closing);
 
                     // Complete the tool call
-                    self.buffer =
-                        self.buffer[end_pos + self.tool_call_end_token.len()..].to_string();
+                    self.buffer = self.buffer[end_pos + marker_len..].to_string();
                     self.reset_streaming_state();
+                    self.awaiting_wrapper_close = marker_len == "</function>".len();
                     self.current_tool_id += 1;
                     continue;
                 } else {
@@ -477,7 +626,7 @@ impl ToolParser for QwenXmlParser {
     }
 
     fn has_tool_markers(&self, text: &str) -> bool {
-        text.contains(self.tool_call_start_token)
+        text.contains(self.tool_call_start_token) || text.contains("<function=")
     }
 
     fn get_unstreamed_tool_args(&self) -> Option<Vec<ToolCallItem>> {
@@ -510,6 +659,7 @@ impl ToolParser for QwenXmlParser {
             &mut self.streamed_args_for_tool,
         );
         self.reset_streaming_state();
+        self.awaiting_wrapper_close = false;
     }
 }
 

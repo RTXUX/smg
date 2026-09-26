@@ -205,6 +205,45 @@ fn coerce_value(raw: &str, declared_type: Option<&str>) -> Value {
 }
 
 impl QwenXmlParser {
+    /// Constrain the native Qwen3 Coder XML format using xgrammar's schema style.
+    pub fn build_structural_tag(tools: &[Tool], at_least_one: bool) -> Value {
+        let tags: Vec<Value> = tools
+            .iter()
+            .filter(|tool| !tool.function.name.is_empty())
+            .map(|tool| {
+                serde_json::json!({
+                    "type": "tag",
+                    "begin": format!("<tool_call>\n<function={}>\n", tool.function.name),
+                    "content": {
+                        "type": "json_schema",
+                        "json_schema": tool.function.parameters,
+                        "style": "qwen_xml",
+                    },
+                    "end": "\n</function>\n</tool_call>",
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "type": "structural_tag",
+            "format": {
+                "type": "triggered_tags",
+                "triggers": ["<tool_call>\n<function="],
+                "tags": tags,
+                "at_least_one": at_least_one,
+            }
+        })
+    }
+
+    /// Allow a prompt-prefilled thinking block to finish before a forced call.
+    pub fn reasoning_prefix() -> Value {
+        serde_json::json!({
+            "type": "tag",
+            "begin": "",
+            "content": {"type": "any_text", "excludes": ["<think>", "</think>", "<tool_call>"]},
+            "end": "</think>",
+        })
+    }
+
     /// Create a new Qwen XML parser
     #[expect(
         clippy::expect_used,

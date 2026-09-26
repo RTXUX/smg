@@ -376,8 +376,14 @@ impl ParserFactory {
             MistralParser::build_structural_tag,
         );
         registry.register_parser("qwen", || Box::new(QwenParser::new()));
-        registry.register_parser("qwen_xml", || Box::new(QwenXmlParser::new()));
-        registry.register_parser("qwen_coder", || Box::new(QwenXmlParser::new()));
+        for name in ["qwen_xml", "qwen_coder", "qwen3_coder"] {
+            registry.register_parser_with_structural_tag(
+                name,
+                || Box::new(QwenXmlParser::new()),
+                QwenXmlParser::build_structural_tag,
+            );
+            registry.register_reasoning_prefix(name, QwenXmlParser::reasoning_prefix);
+        }
         // Nemotron-3 family emits the same XML-parameter format as Qwen3-Coder;
         // named alias so operators can select it explicitly per model.
         registry.register_parser("nemotron", || Box::new(QwenXmlParser::new()));

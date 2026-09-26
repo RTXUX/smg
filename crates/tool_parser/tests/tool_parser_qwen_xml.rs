@@ -1136,3 +1136,49 @@ async fn test_qwen_xml_recovers_missing_fences_at_every_stream_split() {
         assert_streamed_arguments(input, &expected, true).await;
     }
 }
+
+#[test]
+fn structural_generation_uses_native_xml_schema_and_aliases() {
+    use openai_protocol::common::{ToolChoice, ToolChoiceValue};
+    use tool_parser::{factory::ToolConstraint, ParserFactory};
+    let tools = create_test_tools();
+    let factory = ParserFactory::new();
+    for name in ["qwen_xml", "qwen_coder", "qwen3_coder"] {
+        let registry = factory.registry();
+        let constraint = registry
+            .generate_tool_constraint(
+                Some(name),
+                &tools,
+                &ToolChoice::Value(ToolChoiceValue::Required),
+                false,
+            )
+            .unwrap();
+        let Some(ToolConstraint::StructuralTag(tag)) = constraint else {
+            panic!("missing tag")
+        };
+        let tag: serde_json::Value = serde_json::from_str(&tag).unwrap();
+        assert_eq!(tag["format"]["at_least_one"], true);
+        assert_eq!(tag["format"]["tags"][0]["content"]["style"], "qwen_xml");
+        assert_eq!(
+            tag["format"]["tags"][0]["content"]["json_schema"],
+            tools[0].function.parameters
+        );
+        assert_eq!(
+            tag["format"]["tags"][0]["begin"],
+            format!("<tool_call>\n<function={}>\n", tools[0].function.name)
+        );
+        let constraint = registry
+            .generate_tool_constraint(
+                Some(name),
+                &tools,
+                &ToolChoice::Value(ToolChoiceValue::Required),
+                true,
+            )
+            .unwrap();
+        let Some(ToolConstraint::StructuralTag(tag)) = constraint else {
+            panic!("missing reasoning tag")
+        };
+        let tag: serde_json::Value = serde_json::from_str(&tag).unwrap();
+        assert_eq!(tag["format"]["type"], "sequence");
+    }
+}

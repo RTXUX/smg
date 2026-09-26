@@ -170,7 +170,9 @@ impl ParserFactory {
         registry.register_parser("deepseek_v4", || {
             Box::new(
                 BaseReasoningParser::new(ParserConfig::default())
-                    .with_model_type("deepseek_v4".to_string()),
+                    .with_model_type("deepseek_v4".to_string())
+                    .with_tool_start_rule("<｜DSML｜tool_calls>", Some("<｜DSML｜invoke name="))
+                    .with_tool_start_rule("<｜DSML｜invoke name=", None),
             )
         });
 

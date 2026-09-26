@@ -285,6 +285,9 @@ fn render_message(
 
     match role {
         "system" => {
+            if index > 0 {
+                prompt.push_str(USER_SP_TOKEN);
+            }
             prompt.push_str(content);
             if let Some(tools) = tools.filter(|t| !t.is_empty()) {
                 prompt.push_str("\n\n");
@@ -457,7 +460,7 @@ fn render_message(
             // Non-action tasks: append task sp token directly after the message.
             prompt.push_str(sp_token);
         }
-    } else if matches!(role, "user" | "developer") {
+    } else if matches!(role, "user" | "developer") || (role == "system" && index > 0) {
         // Normal generation: append Assistant + thinking token.
         prompt.push_str(ASSISTANT_SP_TOKEN);
         let opens_thinking = thinking_mode == ThinkingMode::Thinking
@@ -738,5 +741,30 @@ mod tests {
         let msgs = [json!({ "role": "moderator", "content": "hi" })];
         let err = encode_messages(&msgs, ThinkingMode::Chat, &EncodeParams::default()).unwrap_err();
         assert!(matches!(err, DsEncodingError::UnknownRole(ref r) if r == "moderator"));
+    }
+    #[test]
+    fn later_system_turns_are_delimited_and_seed_generation() {
+        let messages = [
+            json!({"role": "system", "content": "SYS"}),
+            user("U1"),
+            json!({"role": "system", "content": "MID"}),
+            user("U2"),
+        ];
+        let output =
+            encode_messages(&messages, ThinkingMode::Chat, &EncodeParams::default()).unwrap();
+        assert_eq!(output, format!("{BOS_TOKEN}SYS{USER_SP_TOKEN}U1{USER_SP_TOKEN}MID{USER_SP_TOKEN}U2{ASSISTANT_SP_TOKEN}{THINKING_END_TOKEN}"));
+        for (mode, sentinel) in [
+            (ThinkingMode::Thinking, THINKING_START_TOKEN),
+            (ThinkingMode::Chat, THINKING_END_TOKEN),
+        ] {
+            let messages = [user("U"), json!({"role": "system", "content": "TAIL"})];
+            let output = encode_messages(&messages, mode, &EncodeParams::default()).unwrap();
+            assert_eq!(
+                output,
+                format!(
+                    "{BOS_TOKEN}{USER_SP_TOKEN}U{USER_SP_TOKEN}TAIL{ASSISTANT_SP_TOKEN}{sentinel}"
+                )
+            );
+        }
     }
 }

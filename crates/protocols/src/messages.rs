@@ -480,7 +480,8 @@ pub struct ThinkingBlock {
     /// The thinking content
     pub thinking: String,
 
-    /// Signature for the thinking block
+    /// Signature for the thinking block; third-party replay may omit it.
+    #[serde(default)]
     pub signature: String,
 }
 
@@ -2515,5 +2516,29 @@ mod tests {
         assert_eq!(partition.cache_salt, Some("tenant-a"));
         assert!(partition.extra_key.is_none());
         assert!(partition.lora_path.is_none());
+    }
+    #[test]
+    fn unsigned_thinking_replay_is_accepted_but_invalid_signatures_are_rejected() {
+        let request: CreateMessageRequest = serde_json::from_value(serde_json::json!({
+            "model": "third-party-model", "max_tokens": 64,
+            "messages": [{"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "tool call"},
+                {"type": "tool_use", "id": "call_1", "name": "f", "input": {}}
+            ]}]
+        }))
+        .unwrap();
+        let replay = serde_json::to_value(request).unwrap();
+        assert_eq!(replay["messages"][0]["content"][0]["signature"], "");
+        for signature in [serde_json::json!(null), serde_json::json!(7)] {
+            assert!(serde_json::from_value::<ThinkingBlock>(serde_json::json!({
+                "thinking": "tool call", "signature": signature
+            }))
+            .is_err());
+        }
+        let signed: ThinkingBlock = serde_json::from_value(serde_json::json!({
+            "thinking": "tool call", "signature": "opaque"
+        }))
+        .unwrap();
+        assert_eq!(signed.signature, "opaque");
     }
 }

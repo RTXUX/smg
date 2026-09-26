@@ -93,13 +93,7 @@ spec:
                 fieldRef:
                   fieldPath: status.podIP
             {{- end }}
-            {{- if .Values.huggingface.token }}
-            - name: HF_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "smg.fullname" . }}-hf-token
-                  key: token
-            {{- end }}
+            {{- include "smg.secretEnv" (dict "root" . "worker" false) | nindent 12 }}
             {{- with .Values.router.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

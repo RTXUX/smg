@@ -6,5 +6,11 @@ router:
 history:
   backend: postgres
   postgres:
-    url: "postgresql://smg:<YOUR_PASSWORD>@postgres:5432/smg"  # replace with real credentials
+    host: postgres
+    port: 5432
+    database: smg
+    username:
+      secretKeyRef: {name: smg-postgres, key: username}
+    password:
+      secretKeyRef: {name: smg-postgres, key: password}
     poolMax: 10

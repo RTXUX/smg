@@ -247,7 +247,10 @@ Called from the router Deployment template.
 {{- if eq .Values.history.backend "postgres" }}
 {{- if .Values.history.postgres.url }}
 - "--postgres-db-url"
-- {{ .Values.history.postgres.url | quote }}
+- "$(SMG_POSTGRES_URL)"
+{{- else if .Values.history.postgres.host }}
+- "--postgres-db-url"
+- {{ printf "postgresql://$(SMG_POSTGRES_USERNAME):$(SMG_POSTGRES_PASSWORD)@%s:%v/%s%s" .Values.history.postgres.host .Values.history.postgres.port .Values.history.postgres.database (ternary (printf "?%s" .Values.history.postgres.parameters) "" (ne .Values.history.postgres.parameters "")) | quote }}
 {{- end }}
 - "--postgres-pool-max"
 - {{ .Values.history.postgres.poolMax | quote }}
@@ -255,7 +258,7 @@ Called from the router Deployment template.
 {{- if eq .Values.history.backend "redis" }}
 {{- if .Values.history.redis.url }}
 - "--redis-url"
-- {{ .Values.history.redis.url | quote }}
+- "$(SMG_REDIS_URL)"
 {{- end }}
 - "--redis-pool-max"
 - {{ .Values.history.redis.poolMax | quote }}
@@ -263,17 +266,17 @@ Called from the router Deployment template.
 {{- if eq .Values.history.backend "oracle" }}
 {{- if .Values.history.oracle.dsn }}
 - "--oracle-connect-descriptor"
-- {{ .Values.history.oracle.dsn | quote }}
+- "$(SMG_ORACLE_DSN)"
 {{- end }}
 - "--oracle-pool-max"
 - {{ .Values.history.oracle.poolMax | quote }}
 {{- if .Values.history.oracle.user }}
 - "--oracle-username"
-- {{ .Values.history.oracle.user | quote }}
+- "$(SMG_ORACLE_USER)"
 {{- end }}
 {{- if .Values.history.oracle.password }}
 - "--oracle-password"
-- {{ .Values.history.oracle.password | quote }}
+- "$(SMG_ORACLE_PASSWORD)"
 {{- end }}
 {{- end }}
 {{- if ge (int .Values.auth.rateLimitTokensPerSecond) 0 }}
@@ -301,7 +304,11 @@ Called from the router Deployment template.
 {{- end }}
 {{- if .Values.auth.apiKey }}
 - "--api-key"
-- {{ .Values.auth.apiKey | quote }}
+- "$(SMG_API_KEY)"
+{{- end }}
+{{- range $i, $entry := .Values.auth.controlPlaneApiKeys }}
+- "--control-plane-api-keys"
+- {{ printf "%s:%s:%s:$(SMG_CONTROL_PLANE_KEY_%d)" (required "control plane key id is required" $entry.id) (required "control plane key name is required" $entry.name) (required "control plane key role is required" $entry.role) $i | quote }}
 {{- end }}
 {{- range .Values.router.extraArgs }}
 - {{ . | quote }}
@@ -404,3 +411,45 @@ Used by smg.routerArgs when workers are defined but workerUrls is empty.
 - "{{ $scheme }}://{{ include "smg.fullname" $ }}-worker-{{ $worker.name }}:{{ $port }}"
 {{- end }}
 {{- end }}
+
+{{/* All sensitive values use the same string-or-secretKeyRef contract. */}}
+{{- define "smg.secretFields" -}}
+{{- $fields := list (dict "env" "HF_TOKEN" "key" "hf-token" "value" .Values.huggingface.token) (dict "env" "SMG_API_KEY" "key" "api-key" "value" .Values.auth.apiKey) -}}
+{{- range $i, $entry := .Values.auth.controlPlaneApiKeys -}}
+{{- $fields = append $fields (dict "env" (printf "SMG_CONTROL_PLANE_KEY_%d" $i) "key" (printf "control-plane-key-%d" $i) "value" $entry.key) -}}
+{{- end -}}
+{{- if eq .Values.history.backend "postgres" -}}
+{{- if .Values.history.postgres.url -}}
+{{- $fields = append $fields (dict "env" "SMG_POSTGRES_URL" "key" "postgres-url" "value" .Values.history.postgres.url) -}}
+{{- else if .Values.history.postgres.host -}}
+{{- $fields = concat $fields (list (dict "env" "SMG_POSTGRES_USERNAME" "key" "postgres-username" "value" (required "history.postgres.username is required for URL composition" .Values.history.postgres.username)) (dict "env" "SMG_POSTGRES_PASSWORD" "key" "postgres-password" "value" (required "history.postgres.password is required for URL composition" .Values.history.postgres.password))) -}}
+{{- end -}}
+{{- else if eq .Values.history.backend "redis" -}}
+{{- $fields = append $fields (dict "env" "SMG_REDIS_URL" "key" "redis-url" "value" .Values.history.redis.url) -}}
+{{- else if eq .Values.history.backend "oracle" -}}
+{{- range $key, $value := .Values.history.oracle -}}
+{{- if has $key (list "dsn" "user" "password") -}}
+{{- $fields = append $fields (dict "env" (printf "SMG_ORACLE_%s" (upper $key)) "key" (printf "oracle-%s" $key) "value" $value) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $fields -}}
+{{- end -}}
+
+{{- define "smg.secretEnv" -}}
+{{- $root := .root -}}
+{{- range $field := include "smg.secretFields" $root | fromJsonArray -}}
+{{- if and $field.value (or (not $.worker) (eq $field.env "HF_TOKEN")) }}
+- name: {{ $field.env }}
+  valueFrom:
+    secretKeyRef:
+      {{- if kindIs "map" $field.value }}
+      name: {{ required "secretKeyRef.name is required" $field.value.secretKeyRef.name | quote }}
+      key: {{ required "secretKeyRef.key is required" $field.value.secretKeyRef.key | quote }}
+      {{- else }}
+      name: {{ include "smg.fullname" $root }}-secrets
+      key: {{ $field.key }}
+      {{- end }}
+{{- end -}}
+{{- end -}}
+{{- end -}}

@@ -67,13 +67,7 @@ spec:
           {{- end }}
           {{- if or $.Values.huggingface.token $worker.extraEnv }}
           env:
-            {{- if $.Values.huggingface.token }}
-            - name: HF_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "smg.fullname" $ }}-hf-token
-                  key: token
-            {{- end }}
+            {{- include "smg.secretEnv" (dict "root" $ "worker" true) | nindent 12 }}
             {{- with $worker.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

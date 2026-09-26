@@ -169,3 +169,44 @@ Verify RBAC is enabled and the selector matches your worker pod labels:
 kubectl get role,rolebinding -l app.kubernetes.io/instance=smg
 kubectl get pods -l <your-selector>
 ```
+
+### Existing Secrets and authentication
+
+Sensitive values (`huggingface.token`, `auth.apiKey`, control plane `key`,
+PostgreSQL `url`/`username`/`password`, Redis `url`, and Oracle `dsn`/`user`/`password`)
+accept either a string or a Kubernetes `secretKeyRef`. Strings are stored in the
+chart-managed `<fullname>-secrets` Secret; existing Secret references avoid storing
+credentials in Helm values. Secrets must exist in the release namespace.
+
+```yaml
+auth:
+  apiKey:
+    secretKeyRef: {name: smg-auth, key: api-key}
+  controlPlaneApiKeys:
+    - id: automation
+      name: Automation
+      role: admin
+      key:
+        secretKeyRef: {name: smg-auth, key: control-plane-key}
+huggingface:
+  token:
+    secretKeyRef: {name: model-access, key: token}
+history:
+  backend: postgres
+  postgres:
+    host: postgres.database.svc
+    port: 5432
+    database: smg
+    username:
+      secretKeyRef: {name: smg-postgres, key: username}
+    password:
+      secretKeyRef: {name: smg-postgres, key: password}
+    parameters: sslmode=require
+```
+
+PostgreSQL `url` takes precedence over composition and can reference a Secret
+containing the entire connection URL. For composition, store URL-encoded username
+and password values in the Secret (for example, `@` becomes `%40`). Kubernetes
+expands the credential environment variables in the URL argument without a shell.
+Control plane roles are `admin` or `user`; IDs and names cannot contain colons.
+Secret updates require a pod restart to refresh environment variables.

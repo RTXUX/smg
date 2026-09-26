@@ -196,15 +196,25 @@ router:
 # =============================================================================
 huggingface:
   # -- HuggingFace API token for downloading gated models (e.g., Llama).
-  #    Creates a Secret and injects HF_TOKEN into all worker pods.
-  token: ""
+  #    String or secretKeyRef; injects HF_TOKEN into router and worker pods.
+  token: null
 
 # =============================================================================
 # Auth Configuration
 # =============================================================================
 auth:
-  # -- API key authentication (passed via --api-key CLI flag)
-  apiKey: ""
+  # -- Sensitive fields accept a string or {secretKeyRef: {name: existing-secret, key: data-key}}.
+  #    Strings are stored in a chart-managed Secret. Prefer existing Secrets.
+  # -- API key authentication
+  apiKey: null
+
+  # -- Control plane keys; roles: admin or user
+  controlPlaneApiKeys: []
+  #   - id: automation
+  #     name: Automation
+  #     role: admin
+  #     key:
+  #       secretKeyRef: {name: smg-auth, key: control-plane-key}
 
   # -- Rate limiting
   rateLimitTokensPerSecond: -1  # -1 = disabled
@@ -217,21 +227,29 @@ history:
   backend: memory
 
   postgres:
-    url: ""                    # "postgresql://user:pass@host:5432/db"
+    # -- Full URL (string or secretKeyRef); takes precedence over composition below
+    url: null
+    # -- Compose URL when host is set. Username/password must be URL-encoded.
+    host: ""
+    port: 5432
+    database: smg
+    username: null                # string or secretKeyRef
+    password: null                # string or secretKeyRef
+    parameters: ""              # e.g. sslmode=require (without leading ?)
     poolMax: 10
     # -- Deploy a PostgreSQL instance via sub-chart
     deploy: false
 
   redis:
-    url: ""                    # "redis://localhost:6379"
+    url: null                    # "redis://localhost:6379"
     poolMax: 10
     # -- Deploy a Redis instance via sub-chart
     deploy: false
 
   oracle:
-    dsn: ""                    # Oracle connect descriptor / DSN
-    user: ""
-    password: ""
+    dsn: null                    # Oracle connect descriptor / DSN
+    user: null
+    password: null
     poolMax: 10
 
 # =============================================================================

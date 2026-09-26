@@ -1515,6 +1515,7 @@ class TestRouterArgsFieldOrder:
         "rdma_listen_ip",
         "rdma_slot_ttl_s",
         "log_mm_timing",
+        "structural_tag_scope",
     ]
 
     def test_complete_field_sequence_is_frozen(self):
@@ -1558,3 +1559,14 @@ class TestRouterArgsFieldOrder:
                 f"{appended} must be appended after worker_startup_delay to "
                 "preserve positional callers"
             )
+
+
+def test_structural_tag_scope_options():
+    parser = argparse.ArgumentParser()
+    RouterArgs.add_cli_args(parser)
+    assert parser.parse_args([]).structural_tag_scope == "auto"
+    assert parser.parse_args(["--structural-tag-scope", "always"]).structural_tag_scope == "always"
+    prefixed = argparse.ArgumentParser()
+    RouterArgs.add_cli_args(prefixed, use_router_prefix=True)
+    args = prefixed.parse_args(["--router-structural-tag-scope", "always"])
+    assert args.router_structural_tag_scope == "always"

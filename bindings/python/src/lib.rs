@@ -541,6 +541,7 @@ struct Router {
     rdma_listen_ip: Option<String>,
     rdma_slot_ttl_s: Option<u64>,
     log_mm_timing: bool,
+    structural_tag_scope: String,
 }
 
 impl Router {
@@ -938,6 +939,11 @@ impl Router {
             .maybe_redis(redis_config)
             .maybe_reasoning_parser(self.reasoning_parser.as_ref())
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
+            .structural_tag_scope(if self.structural_tag_scope == "always" {
+                config::StructuralTagScope::Always
+            } else {
+                config::StructuralTagScope::Auto
+            })
             .maybe_mcp_config_path(self.mcp_config_path.as_ref())
             .maybe_storage_hook_wasm_path(self.storage_hook_wasm_path.as_deref())
             .enable_wasm(self.enable_wasm)
@@ -1151,6 +1157,7 @@ impl Router {
         rdma_listen_ip = None,
         rdma_slot_ttl_s = None,
         log_mm_timing = false,
+        structural_tag_scope = "auto".to_string(),
     ))]
     #[expect(clippy::too_many_arguments)]
     #[expect(
@@ -1317,7 +1324,13 @@ impl Router {
         rdma_listen_ip: Option<String>,
         rdma_slot_ttl_s: Option<u64>,
         log_mm_timing: bool,
+        structural_tag_scope: String,
     ) -> PyResult<Self> {
+        if !matches!(structural_tag_scope.as_str(), "auto" | "always") {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "structural_tag_scope must be auto or always",
+            ));
+        }
         let mut all_urls = worker_urls.clone();
 
         if let Some(ref encode_urls) = encode_urls {
@@ -1495,6 +1508,7 @@ impl Router {
             rdma_listen_ip,
             rdma_slot_ttl_s,
             log_mm_timing,
+            structural_tag_scope,
         })
     }
 

@@ -287,9 +287,9 @@ pub(crate) async fn prepare_chat_like(
         // the choice lets the model call, dynamic tools declared on messages
         // included (see `ChatCompletionRequest::callable_tools`).
         let constraint_tools = request.callable_tools();
-        let tool_call_constraint = if let (false, Some(tool_choice)) =
-            (constraint_tools.is_empty(), request.tool_choice.as_ref())
-        {
+        let default_choice = ToolChoice::Value(ToolChoiceValue::Auto);
+        let tool_choice = request.tool_choice.as_ref().unwrap_or(&default_choice);
+        let tool_call_constraint = if !constraint_tools.is_empty() {
             let reasoning = utils::chat_reasoning_starts_in_prefill(request, tokenizer.as_ref());
             ctx.components
                 .tool_parser_factory

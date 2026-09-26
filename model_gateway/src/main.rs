@@ -16,7 +16,7 @@ use smg::{
         CircuitBreakerConfig, ConfigError, ConfigResult, DiscoveryConfig, HealthCheckConfig,
         HistoryBackend, ManualAssignmentMode, MetricsConfig, OracleConfig, PdPairingMode,
         PolicyConfig, PostgresConfig, RedisConfig, RetryConfig, RouterConfig,
-        RoutingKeyOverrideConfig, RoutingMode, SchemaConfig, TenantApiKeyEntry,
+        RoutingKeyOverrideConfig, RoutingMode, SchemaConfig, StructuralTagScope, TenantApiKeyEntry,
         TokenizerCacheConfig, TraceConfig,
     },
     mesh_discovery::MeshDiscoveryConfig,
@@ -1003,6 +1003,10 @@ struct CliArgs {
     /// Parser for tool-call interactions
     #[arg(long, help_heading = "Parsers")]
     tool_call_parser: Option<String>,
+
+    /// Apply structural tags to forced calls (auto) or all tool-enabled requests (always)
+    #[arg(long, default_value = "auto", value_parser = ["auto", "always"], help_heading = "Parsers")]
+    structural_tag_scope: String,
 
     /// Path to MCP server configuration file
     #[arg(long, help_heading = "Parsers")]
@@ -2007,6 +2011,11 @@ impl CliArgs {
             .maybe_redis(redis)
             .maybe_reasoning_parser(self.reasoning_parser.as_ref())
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
+            .structural_tag_scope(if self.structural_tag_scope == "always" {
+                StructuralTagScope::Always
+            } else {
+                StructuralTagScope::Auto
+            })
             .maybe_mcp_config_path(self.mcp_config_path.as_ref())
             .dp_aware(self.dp_aware)
             .pd_pairing_mode(PdPairingMode::parse(&self.pd_pairing_mode).unwrap_or_default())

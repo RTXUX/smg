@@ -99,8 +99,15 @@ impl HarmonyPreparationStage {
 
         // Step 2: Build structural tag constraint
         let tool_constraint = if let Some(tools) = body_ref.tools.as_ref() {
-            Self::generate_tool_call_constraint(tools, body_ref.tool_choice.as_ref())
-                .map_err(|e| *e)?
+            Self::generate_tool_call_constraint(
+                tools,
+                body_ref.tool_choice.as_ref(),
+                ctx.components
+                    .tool_parser_factory
+                    .registry()
+                    .structural_tag_scope(),
+            )
+            .map_err(|e| *e)?
         } else {
             None
         };
@@ -183,8 +190,15 @@ impl HarmonyPreparationStage {
         let tool_constraint = if function_tools.is_empty() {
             None
         } else {
-            Self::generate_tool_call_constraint(&function_tools, chat_tool_choice.as_ref())
-                .map_err(|e| *e)?
+            Self::generate_tool_call_constraint(
+                &function_tools,
+                chat_tool_choice.as_ref(),
+                ctx.components
+                    .tool_parser_factory
+                    .registry()
+                    .structural_tag_scope(),
+            )
+            .map_err(|e| *e)?
         };
 
         let text_constraint = if let Some(text_config) = &request.text {
@@ -306,27 +320,39 @@ impl HarmonyPreparationStage {
     fn generate_tool_call_constraint(
         tools: &[Tool],
         tool_choice: Option<&ToolChoice>,
+        scope: tool_parser::StructuralTagScope,
     ) -> Result<Option<(String, String)>, Box<Response>> {
-        let Some(choice) = tool_choice else {
+        if tools.is_empty() {
             return Ok(None);
-        };
+        }
+        let default_choice = ToolChoice::Value(ToolChoiceValue::Auto);
+        let choice = tool_choice.unwrap_or(&default_choice);
 
         match choice {
             ToolChoice::Function { function, .. } => {
-                let tag = Self::build_tool_call_structural_tag(tools, Some(&function.name))?;
+                let tag = Self::build_tool_call_structural_tag(tools, Some(&function.name), true)?;
                 Ok(Some(("structural_tag".to_string(), tag)))
             }
             ToolChoice::Value(ToolChoiceValue::Required) => {
-                let tag = Self::build_tool_call_structural_tag(tools, None)?;
+                let tag = Self::build_tool_call_structural_tag(tools, None, true)?;
                 Ok(Some(("structural_tag".to_string(), tag)))
             }
             ToolChoice::AllowedTools { mode, .. } => {
                 if mode == "required" {
-                    let tag = Self::build_tool_call_structural_tag(tools, None)?;
+                    let tag = Self::build_tool_call_structural_tag(tools, None, true)?;
+                    Ok(Some(("structural_tag".to_string(), tag)))
+                } else if scope == tool_parser::StructuralTagScope::Always {
+                    let tag = Self::build_tool_call_structural_tag(tools, None, false)?;
                     Ok(Some(("structural_tag".to_string(), tag)))
                 } else {
                     Ok(None)
                 }
+            }
+            ToolChoice::Value(ToolChoiceValue::Auto)
+                if scope == tool_parser::StructuralTagScope::Always =>
+            {
+                let tag = Self::build_tool_call_structural_tag(tools, None, false)?;
+                Ok(Some(("structural_tag".to_string(), tag)))
             }
             ToolChoice::Value(_) => Ok(None),
         }
@@ -340,6 +366,7 @@ impl HarmonyPreparationStage {
     fn build_tool_call_structural_tag(
         tools: &[Tool],
         specific_function: Option<&str>,
+        at_least_one: bool,
     ) -> Result<String, Box<Response>> {
         let mut tags = Vec::new();
 
@@ -402,7 +429,7 @@ impl HarmonyPreparationStage {
                 "type": "triggered_tags",
                 "triggers": ["<|start|>assistant<|channel|>commentary", "<|channel|>commentary"],
                 "tags": tags,
-                "at_least_one": true,
+                "at_least_one": at_least_one,
                 "stop_after_first": stop_after_first
             }
         });

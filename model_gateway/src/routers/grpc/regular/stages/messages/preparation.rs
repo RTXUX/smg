@@ -283,9 +283,9 @@ impl MessagePreparationStage {
         // Step 4: Build tool constraints if tools present. On a thinking
         // prompt a parser with a reasoning prefix gets its tag wrapped so a
         // forced call follows the reasoning instead of preempting it.
-        let tool_call_constraint = if let (false, Some(tool_choice)) =
-            (filtered_tools.is_empty(), chat_tool_choice.as_ref())
-        {
+        let default_choice = ToolChoice::Value(ToolChoiceValue::Auto);
+        let tool_choice = chat_tool_choice.as_ref().unwrap_or(&default_choice);
+        let tool_call_constraint = if !filtered_tools.is_empty() {
             let reasoning =
                 utils::messages_reasoning_starts_in_prefill(request, tokenizer.as_ref());
             ctx.components

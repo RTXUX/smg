@@ -661,6 +661,11 @@ impl RouterConfigBuilder {
         self
     }
 
+    pub fn structural_tag_scope(mut self, scope: super::StructuralTagScope) -> Self {
+        self.config.structural_tag_scope = scope;
+        self
+    }
+
     pub fn tool_call_parser<S: Into<String>>(mut self, parser: S) -> Self {
         self.config.tool_call_parser = Some(parser.into());
         self

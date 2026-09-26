@@ -325,6 +325,12 @@ impl AppContextBuilder {
         let configured_reasoning_parser = router_config.reasoning_parser.clone();
         let configured_tool_parser = router_config.tool_call_parser.clone();
 
+        if let Some(factory) = &self.tool_parser_factory {
+            factory
+                .registry()
+                .set_structural_tag_scope(router_config.structural_tag_scope);
+        }
+
         // Validate configured parser names against their registries at startup
         if let (Some(name), Some(factory)) =
             (&configured_reasoning_parser, &self.reasoning_parser_factory)

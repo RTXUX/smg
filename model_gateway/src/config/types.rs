@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+pub use tool_parser::StructuralTagScope;
 
 use openai_protocol::worker::HealthCheckConfig as ProtocolHealthCheckConfig;
 pub use openai_protocol::worker::{MmProcessingMode, TransportMode};
@@ -296,6 +297,9 @@ pub struct RouterConfig {
     pub reasoning_parser: Option<String>,
     /// For tool-call interactions
     pub tool_call_parser: Option<String>,
+    /// Apply structural tags to optional tool calls as well as forced calls.
+    #[serde(default)]
+    pub structural_tag_scope: StructuralTagScope,
     #[serde(default)]
     pub tokenizer_cache: TokenizerCacheConfig,
     /// Server TLS certificate (PEM)
@@ -1232,6 +1236,7 @@ impl Default for RouterConfig {
             redis: None,
             reasoning_parser: None,
             tool_call_parser: None,
+            structural_tag_scope: StructuralTagScope::Auto,
             tokenizer_cache: TokenizerCacheConfig::default(),
             client_identity: None,
             ca_certificates: vec![],

@@ -119,3 +119,18 @@ We welcome contributions! See the [Contributing Guide](https://lightseek.org/smg
 
 - [Development Setup](https://lightseek.org/smg/contributing/development)
 - [Code Style](https://lightseek.org/smg/contributing/code-style)
+
+### Tool-call structural generation
+
+For engine connections where SMG prepares generation constraints (gRPC/ZMQ),
+`--tool-call-parser qwen3_coder` uses xgrammar's native `qwen_xml` schema style.
+The `qwen_coder` and `qwen_xml` aliases use the same builder.
+
+By default, structural tags constrain required and named tool calls. Use
+`--structural-tag-scope always` to
+also constrain optional calls, including requests that omit `tool_choice`.
+Optional calls remain optional, and `tool_choice: "none"` remains unconstrained.
+The scope applies to all parsers with native structural-tag support; parsers
+without a builder keep their existing behavior. The backend must support the
+emitted structural tags and schema style. With `smg serve`, use
+`--router-structural-tag-scope always`.

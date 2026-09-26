@@ -59,6 +59,17 @@ impl ToolConstraint {
     }
 }
 
+/// Which tool choices receive structural generation constraints.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralTagScope {
+    /// Preserve the default: constrain required and named calls only.
+    #[default]
+    Auto,
+    /// Also constrain optional calls, without forcing the model to call a tool.
+    Always,
+}
+
 /// Registration entry for a parser: creator + optional structural tag builder.
 ///
 /// The structural tag builder is queried at preparation time without instantiating the parser.
@@ -80,6 +91,7 @@ pub struct ParserRegistry {
     model_mapping: Arc<RwLock<HashMap<String, String>>>,
     /// Default parser name
     default_parser: Arc<RwLock<String>>,
+    structural_tag_scope: Arc<RwLock<StructuralTagScope>>,
 }
 
 impl ParserRegistry {
@@ -90,6 +102,7 @@ impl ParserRegistry {
             pool: Arc::new(RwLock::new(HashMap::new())),
             model_mapping: Arc::new(RwLock::new(HashMap::new())),
             default_parser: Arc::new(RwLock::new("passthrough".to_string())),
+            structural_tag_scope: Arc::new(RwLock::new(StructuralTagScope::Auto)),
         }
     }
 
@@ -233,11 +246,19 @@ impl ParserRegistry {
         configured.is_some_and(|p| self.has_structural_tag(p))
     }
 
+    pub fn set_structural_tag_scope(&self, scope: StructuralTagScope) {
+        *self.structural_tag_scope.write() = scope;
+    }
+
+    pub fn structural_tag_scope(&self) -> StructuralTagScope {
+        *self.structural_tag_scope.read()
+    }
+
     /// Generate tool call constraint.
     ///
     /// If `configured_parser` supports structural tags → `StructuralTag(json)`.
     /// Otherwise → `JsonSchema(schema)` for required/function tool_choice.
-    /// Returns `Ok(None)` for auto/none tool_choice.
+    /// Optional calls get tags only with scope `Always`; none is unconstrained.
     ///
     /// `reasoning` says the rendered prompt ends inside the model's thinking
     /// block (the gateway's `chat_reasoning_starts_in_prefill`). A parser that
@@ -259,6 +280,11 @@ impl ParserRegistry {
             ToolChoice::Value(ToolChoiceValue::Required) => true,
             ToolChoice::Function { .. } => true,
             ToolChoice::AllowedTools { mode, .. } if mode == "required" => true,
+            ToolChoice::Value(ToolChoiceValue::Auto) | ToolChoice::AllowedTools { .. }
+                if self.structural_tag_scope() == StructuralTagScope::Always =>
+            {
+                false
+            }
             _ => return Ok(None),
         };
 
@@ -276,6 +302,11 @@ impl ParserRegistry {
                     return Ok(Some(ToolConstraint::StructuralTag(json_str)));
                 }
             }
+        }
+
+        // Optional calls must remain optional even without a native tag builder.
+        if !at_least_one {
+            return Ok(None);
         }
 
         // Fall back to generic JSON schema

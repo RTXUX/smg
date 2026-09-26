@@ -1182,3 +1182,43 @@ fn structural_generation_uses_native_xml_schema_and_aliases() {
         assert_eq!(tag["format"]["type"], "sequence");
     }
 }
+
+#[test]
+fn always_scope_constrains_optional_calls_without_forcing_them() {
+    use openai_protocol::common::{ToolChoice, ToolChoiceValue};
+    use tool_parser::{ParserFactory, StructuralTagScope, ToolConstraint};
+    let factory = ParserFactory::new();
+    let registry = factory.registry();
+    let tools = create_test_tools();
+    let auto = ToolChoice::Value(ToolChoiceValue::Auto);
+    assert!(registry
+        .generate_tool_constraint(Some("qwen3_coder"), &tools, &auto, false)
+        .unwrap()
+        .is_none());
+    registry.set_structural_tag_scope(StructuralTagScope::Always);
+    for choice in [auto, serde_json::from_value(json!({"type": "allowed_tools", "mode": "auto", "tools": [{"type": "function", "name": tools[0].function.name}]})).unwrap()] {
+        let constraint = registry.generate_tool_constraint(Some("qwen3_coder"), &tools, &choice, false).unwrap();
+        let Some(ToolConstraint::StructuralTag(tag)) = constraint else { panic!("missing optional tag") };
+        let tag: serde_json::Value = serde_json::from_str(&tag).unwrap();
+        assert_eq!(tag["format"]["at_least_one"], false);
+        assert!(registry.generate_tool_constraint(Some("qwen"), &tools, &choice, false).unwrap().is_none());
+    }
+    assert!(registry
+        .generate_tool_constraint(
+            Some("qwen3_coder"),
+            &tools,
+            &ToolChoice::Value(ToolChoiceValue::None),
+            false
+        )
+        .unwrap()
+        .is_none());
+    assert!(registry
+        .generate_tool_constraint(
+            Some("qwen3_coder"),
+            &[],
+            &ToolChoice::Value(ToolChoiceValue::Required),
+            false
+        )
+        .unwrap()
+        .is_none());
+}

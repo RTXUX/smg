@@ -283,6 +283,7 @@ class RouterArgs:
     rdma_slot_ttl_s: int | None = None
     # Per-request multimodal timing at INFO; False falls back to SMG_LOG_MM_TIMING
     log_mm_timing: bool = False
+    structural_tag_scope: str = "auto"
 
     @staticmethod
     def add_cli_args(
@@ -1447,6 +1448,12 @@ class RouterArgs:
             default=None,
             choices=tool_call_parser_choices,
             help="Specify the parser for tool-call interactions (e.g., json, qwen)",
+        )
+        parser_group.add_argument(
+            f"--{prefix}structural-tag-scope",
+            choices=["auto", "always"],
+            default="auto",
+            help="Apply structural tags to forced calls (auto) or all tool-enabled requests (always)",
         )
         parser_group.add_argument(
             f"--{prefix}mcp-config-path",

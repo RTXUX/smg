@@ -539,8 +539,8 @@ async fn test_qwen_xml_whitespace_handling() {
     assert_eq!(tools.len(), 1);
 
     let args: serde_json::Value = serde_json::from_str(&tools[0].function.arguments).unwrap();
-    // Values should preserve internal whitespace but trim edges
-    assert_eq!(args["trimmed"], "spaces around");
+    // Whitespace is content except for one structural line break at each edge.
+    assert_eq!(args["trimmed"], "  spaces around  ");
     assert!(args["newlines"].as_str().unwrap().contains("Line 1"));
     assert!(args["newlines"].as_str().unwrap().contains("Line 2"));
 }
@@ -995,7 +995,7 @@ async fn test_qwen_xml_empty_parameter_value() {
 
     let args: serde_json::Value = serde_json::from_str(&tools[0].function.arguments).unwrap();
     assert_eq!(args["empty"], "");
-    assert_eq!(args["whitespace"], ""); // Trimmed
+    assert_eq!(args["whitespace"], "   ");
     assert_eq!(args["normal"], "value");
 }
 
@@ -1102,4 +1102,20 @@ async fn test_qwen_xml_mixed_html_and_json() {
     assert!(args["config"].is_object());
     assert_eq!(args["config"]["operator"], "&amp;&amp;");
     assert_eq!(args["config"]["escape"], true);
+}
+
+/// 2e97297: indentation and string whitespace survive both serving modes.
+#[tokio::test]
+async fn test_qwen_xml_preserves_indentation_at_every_stream_split() {
+    let input = "<tool_call><function=search><parameter=query>\n    你好\n  next  \n</parameter></function></tool_call>";
+    let expected = json!({"query": "    你好\n  next  "});
+    let (_, calls) = QwenXmlParser::new()
+        .parse_complete_with_tools(input, &create_test_tools())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&calls[0].function.arguments).unwrap(),
+        expected
+    );
+    assert_streamed_arguments(input, &[("search", expected)], true).await;
 }

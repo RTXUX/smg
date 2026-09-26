@@ -54,6 +54,17 @@ pub struct QwenXmlParser {
     xml_param_pattern: Regex,
 }
 
+/// Strip at most one structural line break at each edge of an XML value.
+fn strip_structural_line_breaks(raw: &str) -> &str {
+    let raw = raw
+        .strip_prefix("\r\n")
+        .or_else(|| raw.strip_prefix('\n'))
+        .unwrap_or(raw);
+    raw.strip_suffix("\r\n")
+        .or_else(|| raw.strip_suffix('\n'))
+        .unwrap_or(raw)
+}
+
 /// Parse a raw parameter value, similar to Python's `_safe_val`.
 ///
 /// Argument values are treated **literally** — no HTML-entity decoding. This
@@ -84,7 +95,7 @@ fn safe_val(raw: &str) -> Value {
     }
 
     // Fall back to string
-    Value::String(trimmed.to_string())
+    Value::String(raw.to_string())
 }
 
 /// Coerce an XML parameter value by its declared schema type, falling back to
@@ -93,8 +104,8 @@ fn safe_val(raw: &str) -> Value {
 /// Values are treated literally; see [`safe_val`] for why the format is not
 /// HTML-unescaped.
 fn coerce_value(raw: &str, declared_type: Option<&str>) -> Value {
-    let trimmed = raw.trim();
-    helpers::coerce_by_schema_type(trimmed, declared_type).unwrap_or_else(|| safe_val(raw))
+    let raw = strip_structural_line_breaks(raw);
+    helpers::coerce_by_schema_type(raw, declared_type).unwrap_or_else(|| safe_val(raw))
 }
 
 impl QwenXmlParser {
@@ -535,7 +546,10 @@ mod tests {
             safe_val("hello world"),
             Value::String("hello world".to_string())
         );
-        assert_eq!(safe_val("  spaces  "), Value::String("spaces".to_string()));
+        assert_eq!(
+            safe_val("  spaces  "),
+            Value::String("  spaces  ".to_string())
+        );
     }
 
     // Values are treated literally: entity-like substrings must NOT be decoded

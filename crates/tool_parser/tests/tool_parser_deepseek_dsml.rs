@@ -791,10 +791,9 @@ async fn test_deepseek_v4_streaming_holds_back_unparsed_false_values() {
     assert_eq!(args, r#"{"flags":[1,true,null]}"#);
 }
 
-/// End of stream right after the block opener: the opener is tool syntax,
-/// not content, so nothing is flushed; a held-back `<` with no sentinel is.
+/// An unconfirmed block opener stays literal at EOF (2920a09).
 #[tokio::test]
-async fn test_deepseek_v4_end_of_stream_drops_a_truncated_opener() {
+async fn test_deepseek_v4_end_of_stream_preserves_an_unconfirmed_opener() {
     let tools = create_test_tools();
     let mut parser = DeepSeekDsmlParser::v4();
     let first = parser.parse_incremental("Hello ", &tools).await.unwrap();
@@ -805,11 +804,14 @@ async fn test_deepseek_v4_end_of_stream_drops_a_truncated_opener() {
         .unwrap();
     assert_eq!(second.normal_text, "");
     assert!(second.calls.is_empty());
-    assert_eq!(parser.take_unstreamed_normal_text(), "");
+    assert_eq!(parser.take_unstreamed_normal_text(), "<｜DSML｜tool_calls>");
 
     let mut parser = DeepSeekDsmlParser::v4();
-    parser.parse_incremental("a <", &tools).await.unwrap();
-    assert_eq!(parser.take_unstreamed_normal_text(), "a <");
+    let emitted = parser.parse_incremental("a <", &tools).await.unwrap();
+    assert_eq!(
+        emitted.normal_text + &parser.take_unstreamed_normal_text(),
+        "a <"
+    );
 }
 
 /// Shared streaming fix: a `string="true"` value starting with a newline and
@@ -837,4 +839,70 @@ async fn test_deepseek_v4_streaming_keeps_leading_whitespace_in_string_values() 
         }
     }
     assert_eq!(args, "{\"query\":\"\\n杭州市\"}");
+}
+
+/// 2920a09: documentation is literal until an invoke confirms a block.
+#[tokio::test]
+async fn test_deepseek_v4_literal_markers_survive_batch_and_streaming() {
+    for text in [
+        "Docs mention <｜DSML｜tool_calls> literally.",
+        "<｜DSML｜tool_calls>\nnot an invoke\n</｜DSML｜tool_calls>",
+    ] {
+        let (normal, calls) = DeepSeekDsmlParser::v4().parse_complete(text).await.unwrap();
+        assert_eq!(normal, text);
+        assert!(calls.is_empty());
+        for (index, _) in text.char_indices() {
+            let mut parser = DeepSeekDsmlParser::v4();
+            let mut normal = String::new();
+            for chunk in [&text[..index], &text[index..]] {
+                let delta = parser
+                    .parse_incremental(chunk, &create_test_tools())
+                    .await
+                    .unwrap();
+                normal.push_str(&delta.normal_text);
+                assert!(delta.calls.is_empty());
+            }
+            normal.push_str(&parser.take_unstreamed_normal_text());
+            assert_eq!(normal, text, "split {index}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_deepseek_v4_literal_marker_before_real_call_preserves_prefix() {
+    let prefix = "Docs mention <｜DSML｜tool_calls> literally. ";
+    let block = "<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"get_weather\"><｜DSML｜parameter name=\"city\" string=\"true\">Boston</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>";
+    let text = format!("{prefix}{block}");
+    let (normal, calls) = DeepSeekDsmlParser::v4()
+        .parse_complete(&text)
+        .await
+        .unwrap();
+    assert_eq!(normal, prefix.trim_end());
+    assert_eq!(calls.len(), 1);
+    for (index, _) in text.char_indices() {
+        let mut parser = DeepSeekDsmlParser::v4();
+        let mut normal = String::new();
+        let mut names = Vec::new();
+        for chunk in [&text[..index], &text[index..]] {
+            let delta = parser
+                .parse_incremental(chunk, &create_test_tools())
+                .await
+                .unwrap();
+            normal.push_str(&delta.normal_text);
+            names.extend(delta.calls.into_iter().filter_map(|call| call.name));
+        }
+        assert_eq!(normal, prefix, "split {index}");
+        assert_eq!(names, ["get_weather"], "split {index}");
+        parser.reset();
+        let literal = "Documentation <｜DSML｜tool_calls> is literal.";
+        let delta = parser
+            .parse_incremental(literal, &create_test_tools())
+            .await
+            .unwrap();
+        assert!(delta.calls.is_empty());
+        assert_eq!(
+            delta.normal_text + &parser.take_unstreamed_normal_text(),
+            literal
+        );
+    }
 }

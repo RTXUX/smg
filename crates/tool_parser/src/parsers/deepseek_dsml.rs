@@ -119,6 +119,8 @@ pub struct DeepSeekDsmlParser {
     /// V4.1 streaming: a tool marker has been seen, so everything from it on
     /// belongs to the tool section (text after it is never content again).
     in_tool_section: bool,
+    /// V4 has confirmed an invoke; preceding unconfirmed openers remain literal.
+    v4_tool_started: bool,
 }
 
 /// The DSML sentinel every tag starts with (`<` + this + tag name).
@@ -248,6 +250,7 @@ impl DeepSeekDsmlParser {
             current_tool_name_sent: false,
             streamed_args_for_tool: Vec::new(),
             in_tool_section: false,
+            v4_tool_started: false,
         }
     }
 
@@ -265,7 +268,11 @@ impl DeepSeekDsmlParser {
     /// Byte offset of the first tool marker in `text`: the block opener, or
     /// for V4.1 also a block-less invoke opener.
     fn first_tool_marker(&self, text: &str) -> Option<usize> {
-        let block = text.find(self.block_open.as_str());
+        let block = if self.dialect == DsmlDialect::V4 {
+            self.v4_block_start(text).0
+        } else {
+            text.find(self.block_open.as_str())
+        };
         if !self.dialect.is_v41() {
             return block;
         }
@@ -274,6 +281,23 @@ impl DeepSeekDsmlParser {
             (Some(b), Some(i)) => Some(b.min(i)),
             (b, i) => b.or(i),
         }
+    }
+
+    /// A V4 block opener is syntax only when an invoke follows it. Return
+    /// undecided candidates separately so streaming can wait for the next chunk.
+    fn v4_block_start(&self, text: &str) -> (Option<usize>, Option<usize>) {
+        let invoke = "<｜DSML｜invoke name=";
+        let mut pending = None;
+        for (index, _) in text.match_indices(&self.block_open) {
+            let tail = text[index + self.block_open.len()..].trim_start();
+            if tail.starts_with(invoke) {
+                return (Some(index), pending);
+            }
+            if invoke.starts_with(tail) && pending.is_none() {
+                pending = Some(index);
+            }
+        }
+        (None, pending)
     }
 
     /// V4.1 content before a tool marker: the reference strips exactly the
@@ -733,22 +757,26 @@ impl ToolParser for DeepSeekDsmlParser {
             return self.parse_complete_v41(text);
         }
 
-        let idx = text
-            .find(self.block_open.as_str())
-            .ok_or_else(|| ParserError::ParsingFailed("DSML marker not found".to_string()))?;
+        let Some(idx) = self.first_tool_marker(text) else {
+            return Ok((text.to_string(), vec![]));
+        };
         let normal_text = text[..idx].trim_end().to_string();
 
         let mut tools = Vec::new();
 
-        for fc_cap in self.tool_call_complete_regex.captures_iter(text) {
+        let mut cursor = idx;
+        while let Some(relative_start) = self.first_tool_marker(&text[cursor..]) {
+            let start = cursor + relative_start;
+            let Some(fc_cap) = self.tool_call_complete_regex.captures(&text[start..]) else {
+                break;
+            };
             let fc_content = fc_cap.get(1).map_or("", |m| m.as_str());
-
             for inv_cap in self.invoke_complete_regex.captures_iter(fc_content) {
                 let func_name = inv_cap.get(1).map_or("", |m| m.as_str());
                 let invoke_content = inv_cap.get(2).map_or("", |m| m.as_str());
-
                 tools.push(self.parse_invoke(func_name, invoke_content));
             }
+            cursor = start + fc_cap.get(0).map_or(0, |m| m.end());
         }
 
         if tools.is_empty() {
@@ -767,6 +795,31 @@ impl ToolParser for DeepSeekDsmlParser {
 
         if self.dialect.is_v41() {
             return Ok(self.parse_incremental_v41());
+        }
+
+        let mut literal_prefix = String::new();
+        if self.dialect == DsmlDialect::V4 && !self.v4_tool_started {
+            let (block, pending) = self.v4_block_start(&self.buffer);
+            let bare = self.buffer.find("<｜DSML｜invoke name=");
+            if let Some(index) = block.into_iter().chain(bare).min() {
+                literal_prefix = self.buffer[..index].to_string();
+                self.buffer.drain(..index);
+                self.v4_tool_started = true;
+            } else {
+                let suffix = longest_partial_suffix(
+                    &self.buffer,
+                    &[&self.block_open, "<｜DSML｜invoke name="],
+                );
+                let emit_end = pending
+                    .unwrap_or(self.buffer.len() - suffix)
+                    .min(self.buffer.len() - suffix);
+                let normal_text = self.buffer[..emit_end].to_string();
+                self.buffer.drain(..emit_end);
+                return Ok(StreamingParseResult {
+                    normal_text,
+                    calls: vec![],
+                });
+            }
         }
 
         let current_text = self.buffer.clone();
@@ -814,13 +867,14 @@ impl ToolParser for DeepSeekDsmlParser {
         let calls = self.stream_invokes(Some(&tool_indices));
 
         Ok(StreamingParseResult {
-            normal_text: String::new(),
+            normal_text: literal_prefix,
             calls,
         })
     }
 
     fn has_tool_markers(&self, text: &str) -> bool {
-        self.first_tool_marker(text).is_some()
+        text.contains(&self.block_open)
+            || (self.dialect.is_v41() && self.first_tool_marker(text).is_some())
     }
 
     fn get_unstreamed_tool_args(&self) -> Option<Vec<ToolCallItem>> {
@@ -847,10 +901,13 @@ impl ToolParser for DeepSeekDsmlParser {
         // a tool opener; V3.2/V4 hold `<`/`</` prefixes and, once the DSML
         // sentinel has arrived, everything from it on. At end of stream the
         // held text is content when no tool syntax ever started, and is
-        // dropped otherwise: a truncated opener or invoke is not content (the
-        // remaining arguments of a truncated invoke come from
-        // `get_unstreamed_tool_args`).
-        if self.in_tool_section || self.buffer.contains("<｜DSML｜") {
+        // dropped otherwise. V4's opener alone remains literal until an invoke
+        // confirms it. The remaining arguments of a truncated invoke come from
+        // `get_unstreamed_tool_args`.
+        if self.in_tool_section
+            || (self.buffer.contains("<｜DSML｜")
+                && (self.dialect != DsmlDialect::V4 || self.v4_tool_started))
+        {
             self.buffer.clear();
             return String::new();
         }
@@ -865,5 +922,6 @@ impl ToolParser for DeepSeekDsmlParser {
         self.current_tool_name_sent = false;
         self.streamed_args_for_tool.clear();
         self.in_tool_section = false;
+        self.v4_tool_started = false;
     }
 }

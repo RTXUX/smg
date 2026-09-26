@@ -902,6 +902,45 @@ fn render_chat_template(
         .get_template("chat")
         .map_err(|e| anyhow!("Failed to get template: {e}"))?;
 
+    // Header-only streamed calls can be replayed with empty arguments. Keep
+    // string-aware templates valid JSON and leave the caller's history intact.
+    let canonical;
+    let messages = if messages.iter().any(|message| {
+        message
+            .get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|calls| {
+                calls.iter().any(|call| {
+                    call.pointer("/function/arguments")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|args| args.trim().is_empty())
+                })
+            })
+    }) {
+        canonical = messages
+            .iter()
+            .cloned()
+            .map(|mut message| {
+                if let Some(calls) = message
+                    .get_mut("tool_calls")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    for call in calls {
+                        if let Some(args) = call.pointer_mut("/function/arguments") {
+                            if args.as_str().is_some_and(|args| args.trim().is_empty()) {
+                                *args = serde_json::json!("{}");
+                            }
+                        }
+                    }
+                }
+                message
+            })
+            .collect::<Vec<_>>();
+        canonical.as_slice()
+    } else {
+        messages
+    };
+
     // Convert messages to minijinja::Value (messages already processed by router)
     let minijinja_messages: Vec<Value> = messages.iter().map(Value::from_serialize).collect();
 
@@ -1384,5 +1423,26 @@ mod tests {
         let state = ChatTemplateState::new(Some("{{ undefined_value }}".to_string())).unwrap();
         let out = state.apply(&[], ChatTemplateParams::default()).unwrap();
         assert_eq!(out, "");
+    }
+    #[test]
+    fn empty_tool_arguments_render_valid_json_without_mutating_history() {
+        let template = ChatTemplateState::new(Some(
+            "{%- for tc in messages[0].tool_calls -%}{{ tc.function.arguments }}{%- endfor -%}"
+                .to_string(),
+        ))
+        .unwrap();
+        for empty in ["", "   ", "\n"] {
+            let messages = [serde_json::json!({"role": "assistant", "tool_calls": [{
+                "function": {"name": "f", "arguments": empty}
+            }]})];
+            let rendered = template
+                .apply(&messages, ChatTemplateParams::default())
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&rendered).unwrap(),
+                serde_json::json!({})
+            );
+            assert_eq!(messages[0]["tool_calls"][0]["function"]["arguments"], empty);
+        }
     }
 }

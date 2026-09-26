@@ -204,7 +204,11 @@ pub(crate) fn process_tool_call_arguments(messages: &mut [Value]) -> Result<(), 
             };
 
             // Parse JSON string to object (like Python json.loads)
-            match serde_json::from_str::<Value>(args_str) {
+            match serde_json::from_str::<Value>(if args_str.trim().is_empty() {
+                "{}"
+            } else {
+                args_str
+            }) {
                 Ok(parsed) => *args = parsed,
                 Err(e) => {
                     return Err(format!(
@@ -2108,5 +2112,18 @@ mod tests {
             missing_tokenizer_response("served-model", true).status(),
             http::StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+    #[test]
+    fn empty_replayed_tool_arguments_are_normalized_before_template_rendering() {
+        for empty in ["", "   ", "\n"] {
+            let mut messages = [json!({"role": "assistant", "tool_calls": [{
+                "function": {"name": "f", "arguments": empty}
+            }]})];
+            process_tool_call_arguments(&mut messages).unwrap();
+            assert_eq!(
+                messages[0]["tool_calls"][0]["function"]["arguments"],
+                json!({})
+            );
+        }
     }
 }

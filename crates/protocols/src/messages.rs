@@ -280,6 +280,26 @@ pub enum SystemContent {
     Blocks(Vec<SystemContentBlock>),
 }
 
+impl SystemContent {
+    /// Remove a leading Claude Code billing line, matching Dynamo's opt-in behavior.
+    /// Only the first system text is inspected; block metadata is preserved.
+    pub fn strip_billing_preamble(&mut self) {
+        let text = match self {
+            Self::String(text) => text,
+            Self::Blocks(blocks) => match blocks.first_mut() {
+                Some(SystemContentBlock::Text(block)) => &mut block.text,
+                None => return,
+            },
+        };
+        let trimmed = text.trim_start();
+        if trimmed.starts_with("x-anthropic-billing-header:") {
+            if let Some(newline) = trimmed.find('\n') {
+                *text = trimmed[newline + 1..].to_owned();
+            }
+        }
+    }
+}
+
 /// System content block — wraps TextBlock with the required `type` discriminator
 /// so it round-trips correctly through serialization.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1958,6 +1978,48 @@ mod tests {
     use serde_json::{self, json};
 
     use super::*;
+
+    #[test]
+    fn test_strip_billing_preamble_strings() {
+        for (input, expected) in [
+            (
+                "x-anthropic-billing-header: cc_version=1; cch=abc;\nPrompt",
+                "Prompt",
+            ),
+            (
+                " \r\nx-anthropic-billing-header: cch=abc;\r\n  Prompt\n",
+                "  Prompt\n",
+            ),
+            ("x-anthropic-billing-header: cch=abc;\n", ""),
+            (
+                "x-anthropic-billing-header: cch=abc;",
+                "x-anthropic-billing-header: cch=abc;",
+            ),
+            (
+                "  Prompt\nx-anthropic-billing-header: cch=abc;\n",
+                "  Prompt\nx-anthropic-billing-header: cch=abc;\n",
+            ),
+            ("", ""),
+        ] {
+            let mut system = SystemContent::String(input.to_owned());
+            system.strip_billing_preamble();
+            assert_eq!(serde_json::to_value(system).unwrap(), json!(expected));
+        }
+    }
+
+    #[test]
+    fn test_strip_billing_preamble_blocks_preserves_metadata() {
+        let mut value = json!([
+            {"type": "text", "text": "x-anthropic-billing-header: cch=abc;\nPrompt", "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "x-anthropic-billing-header: keep this\nMore"}
+        ]);
+        let mut system: SystemContent = serde_json::from_value(value.clone()).unwrap();
+        system.strip_billing_preamble();
+        value[0]["text"] = json!("Prompt");
+        assert_eq!(serde_json::to_value(system).unwrap(), value);
+        let mut empty = SystemContent::Blocks(vec![]);
+        empty.strip_billing_preamble();
+    }
 
     #[test]
     fn test_system_blocks_preserve_type_field() {

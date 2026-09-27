@@ -134,3 +134,13 @@ The scope applies to all parsers with native structural-tag support; parsers
 without a builder keep their existing behavior. The backend must support the
 emitted structural tags and schema style. With `smg serve`, use
 `--router-structural-tag-scope always`.
+
+### Anthropic billing preamble
+
+Use `--strip-anthropic-preamble` (or `SMG_STRIP_ANTHROPIC_PREAMBLE=true`)
+to remove the leading `x-anthropic-billing-header: ...` line from the system
+prompt on `/v1/messages` and `/v1/messages/count_tokens` before routing or
+tokenization. This improves prefix cache reuse for Claude Code requests with
+session-specific billing text. Disabled by default; both string and text-block
+system prompts are supported. The Python router also accepts
+`strip_anthropic_preamble=True`.

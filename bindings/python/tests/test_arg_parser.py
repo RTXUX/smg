@@ -1437,6 +1437,7 @@ class TestRouterArgsFieldOrder:
         "tokenizer_cache_l0_max_entries",
         "tokenizer_cache_enable_l1",
         "tokenizer_cache_l1_max_memory",
+        "strip_anthropic_preamble",
         "reasoning_parser",
         "tool_call_parser",
         "mcp_config_path",
@@ -1570,3 +1571,22 @@ def test_structural_tag_scope_options():
     RouterArgs.add_cli_args(prefixed, use_router_prefix=True)
     args = prefixed.parse_args(["--router-structural-tag-scope", "always"])
     assert args.router_structural_tag_scope == "always"
+
+
+@pytest.mark.parametrize("prefix", ["", "router-"])
+def test_strip_anthropic_preamble_cli(prefix, monkeypatch):
+    monkeypatch.delenv("SMG_STRIP_ANTHROPIC_PREAMBLE", raising=False)
+    parser = argparse.ArgumentParser()
+    RouterArgs.add_cli_args(parser, use_router_prefix=bool(prefix))
+    defaults = RouterArgs.from_cli_args(parser.parse_args([]), use_router_prefix=bool(prefix))
+    assert defaults.strip_anthropic_preamble is False
+    args = RouterArgs.from_cli_args(
+        parser.parse_args([f"--{prefix}strip-anthropic-preamble"]),
+        use_router_prefix=bool(prefix),
+    )
+    assert args.strip_anthropic_preamble is True
+
+
+def test_strip_anthropic_preamble_env(monkeypatch):
+    monkeypatch.setenv("SMG_STRIP_ANTHROPIC_PREAMBLE", "true")
+    assert parse_router_args([]).strip_anthropic_preamble is True

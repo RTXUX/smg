@@ -288,8 +288,13 @@ async fn v1_messages(
     headers: HeaderMap,
     Extension(tenant_meta): Extension<middleware::TenantRequestMeta>,
     cancel: middleware::scheduler::PreemptionGuard,
-    ValidatedJson(body): ValidatedJson<CreateMessageRequest>,
+    ValidatedJson(mut body): ValidatedJson<CreateMessageRequest>,
 ) -> Response {
+    if state.context.router_config.strip_anthropic_preamble {
+        if let Some(system) = &mut body.system {
+            system.strip_billing_preamble();
+        }
+    }
     let model = body.model.clone();
     cancel
         .guard(
@@ -305,8 +310,13 @@ async fn v1_messages_count_tokens(
     headers: HeaderMap,
     Extension(tenant_meta): Extension<middleware::TenantRequestMeta>,
     cancel: middleware::scheduler::PreemptionGuard,
-    Json(body): Json<CountMessageTokensRequest>,
+    Json(mut body): Json<CountMessageTokensRequest>,
 ) -> Response {
+    if state.context.router_config.strip_anthropic_preamble {
+        if let Some(system) = &mut body.system {
+            system.strip_billing_preamble();
+        }
+    }
     let model = body.model.clone();
     cancel
         .guard(

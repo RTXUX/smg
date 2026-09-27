@@ -1000,6 +1000,15 @@ struct CliArgs {
     #[arg(long, help_heading = "Parsers")]
     reasoning_parser: Option<String>,
 
+    /// Strip the leading Claude Code billing line from Anthropic system prompts
+    #[arg(
+        long,
+        env = "SMG_STRIP_ANTHROPIC_PREAMBLE",
+        default_value_t = false,
+        help_heading = "Parsers"
+    )]
+    strip_anthropic_preamble: bool,
+
     /// Parser for tool-call interactions
     #[arg(long, help_heading = "Parsers")]
     tool_call_parser: Option<String>,
@@ -2010,6 +2019,7 @@ impl CliArgs {
             .maybe_postgres(postgres)
             .maybe_redis(redis)
             .maybe_reasoning_parser(self.reasoning_parser.as_ref())
+            .strip_anthropic_preamble(self.strip_anthropic_preamble)
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
             .structural_tag_scope(if self.structural_tag_scope == "always" {
                 StructuralTagScope::Always

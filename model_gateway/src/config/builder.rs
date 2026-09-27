@@ -661,6 +661,11 @@ impl RouterConfigBuilder {
         self
     }
 
+    pub fn strip_anthropic_preamble(mut self, enabled: bool) -> Self {
+        self.config.strip_anthropic_preamble = enabled;
+        self
+    }
+
     pub fn structural_tag_scope(mut self, scope: super::StructuralTagScope) -> Self {
         self.config.structural_tag_scope = scope;
         self

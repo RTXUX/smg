@@ -468,6 +468,7 @@ struct Router {
     tokenizer_cache_l0_max_entries: usize,
     tokenizer_cache_enable_l1: bool,
     tokenizer_cache_l1_max_memory: usize,
+    strip_anthropic_preamble: bool,
     reasoning_parser: Option<String>,
     tool_call_parser: Option<String>,
     mcp_config_path: Option<String>,
@@ -938,6 +939,7 @@ impl Router {
             .maybe_postgres(postgres_config)
             .maybe_redis(redis_config)
             .maybe_reasoning_parser(self.reasoning_parser.as_ref())
+            .strip_anthropic_preamble(self.strip_anthropic_preamble)
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
             .structural_tag_scope(if self.structural_tag_scope == "always" {
                 config::StructuralTagScope::Always
@@ -1158,6 +1160,7 @@ impl Router {
         rdma_slot_ttl_s = None,
         log_mm_timing = false,
         structural_tag_scope = "auto".to_string(),
+        strip_anthropic_preamble = false,
     ))]
     #[expect(clippy::too_many_arguments)]
     #[expect(
@@ -1325,6 +1328,7 @@ impl Router {
         rdma_slot_ttl_s: Option<u64>,
         log_mm_timing: bool,
         structural_tag_scope: String,
+        strip_anthropic_preamble: bool,
     ) -> PyResult<Self> {
         if !matches!(structural_tag_scope.as_str(), "auto" | "always") {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -1442,6 +1446,7 @@ impl Router {
             tokenizer_cache_l0_max_entries,
             tokenizer_cache_enable_l1,
             tokenizer_cache_l1_max_memory,
+            strip_anthropic_preamble,
             reasoning_parser,
             tool_call_parser,
             mcp_config_path,

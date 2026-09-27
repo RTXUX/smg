@@ -166,6 +166,7 @@ class RouterArgs:
     tokenizer_cache_enable_l1: bool = False
     tokenizer_cache_l1_max_memory: int = 50 * 1024 * 1024  # 50MB
     # Parser configuration
+    strip_anthropic_preamble: bool = False
     reasoning_parser: str | None = None
     tool_call_parser: str | None = None
     # MCP server configuration
@@ -1430,6 +1431,13 @@ class RouterArgs:
             type=int,
             default=RouterArgs.tokenizer_cache_l1_max_memory,
             help="Maximum memory for L1 tokenizer cache in bytes (default: 50MB)",
+        )
+
+        parser_group.add_argument(
+            f"--{prefix}strip-anthropic-preamble",
+            action="store_true",
+            default=os.environ.get("SMG_STRIP_ANTHROPIC_PREAMBLE", "").lower() in ("1", "true"),
+            help="Strip the leading Claude Code billing line from Anthropic system prompts",
         )
 
         # Parser configuration

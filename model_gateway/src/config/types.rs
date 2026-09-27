@@ -295,6 +295,9 @@ pub struct RouterConfig {
     pub redis: Option<RedisConfig>,
     /// For reasoning models (e.g., deepseek-r1, qwen3)
     pub reasoning_parser: Option<String>,
+    /// Strip the leading Claude Code billing line from Anthropic system prompts.
+    #[serde(default)]
+    pub strip_anthropic_preamble: bool,
     /// For tool-call interactions
     pub tool_call_parser: Option<String>,
     /// Apply structural tags to optional tool calls as well as forced calls.
@@ -1235,6 +1238,7 @@ impl Default for RouterConfig {
             postgres: None,
             redis: None,
             reasoning_parser: None,
+            strip_anthropic_preamble: false,
             tool_call_parser: None,
             structural_tag_scope: StructuralTagScope::Auto,
             tokenizer_cache: TokenizerCacheConfig::default(),

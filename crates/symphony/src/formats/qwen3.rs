@@ -25,6 +25,7 @@ pub fn qwen3(syntax: CallSyntax) -> Format {
         .transition("content", "think_open", "reasoning")
         .transition("reasoning", "think_close", "content")
         .transition("content", "call_open", "calls")
+        .transition("reasoning", "call_open", "calls")
         .transition("calls", "call_close", "content")
         .transition("calls", "call_open", "calls")
         .calls(syntax)
@@ -43,6 +44,29 @@ mod tests {
     };
 
     const CALL: &str = "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>";
+
+    #[test]
+    fn a_tool_call_ends_an_unclosed_thought() {
+        let text = format!("<think>Plan.{CALL}");
+        for cut in text.char_indices().map(|(index, _)| index) {
+            let events = run(&[&text[..cut], &text[cut..]], EngineFinish::Stop);
+            assert!(events
+                .iter()
+                .any(|event| matches!(event, Event::ReasoningEnd)));
+            assert!(events
+                .iter()
+                .any(|event| matches!(event, Event::ToolCallStart { .. })));
+            let reasoning: String = events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Reasoning(text) => Some(text.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(reasoning, "Plan.");
+            assert_eq!(bytes(&events), text);
+        }
+    }
 
     fn delta(text: &str) -> Input<'_> {
         Input::Delta {

@@ -23,6 +23,7 @@ pub mod traits;
 mod v1;
 
 pub mod chat_template;
+mod grammar;
 pub mod huggingface;
 mod kimi_k2_tokenizer;
 pub mod tiktoken;

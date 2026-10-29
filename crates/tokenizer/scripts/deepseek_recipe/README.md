@@ -37,8 +37,11 @@ The older `render_fixtures.json`, `render_ids_fixtures.json`, and
 `generate_deepseek_v41_fixtures.py` retain the previous engine-format reference;
 they are not the acceptance oracle for the recipe renderer.
 
-From the repository root, export the native and Symphony grammars before
-and after the prefilled block opener, then check them with XGrammar:
+From the repository root, export the legacy and Symphony grammars before
+and after the prefilled block opener, plus automatic and single-call variants.
+The XGrammar checks cover tokenizer-free validation, token acceptance, and
+sampling masks for strings, JSON, merged boundaries, literal versus control
+DSML tokens, and single-block termination:
 
 ```sh
 SMG_V41_GRAMMARS_OUT=/tmp/v41-grammars.json \

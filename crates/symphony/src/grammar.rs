@@ -6,7 +6,8 @@
 //! (xgrammar's, which the serving engines accept): a `triggered_tags` of per-tool `tag`s, each a
 //! `begin`, a content grammar and an `end`; `sequence`, `or`, `star`, `plus` and `optional` to
 //! compose; `const_string`, `any_text`, `regex`, `json_schema` and `token` as leaves.
-//! [`Grammar::to_json`] writes it as the engine reads it, and [`Grammar::payload`] wraps it as the
+//! DSML also uses symbolic token leaves, lowered by the model tokenizer before backend validation.
+//! [`Grammar::to_json`] writes the tree, and [`Grammar::payload`] wraps it as the
 //! request carries it.
 //!
 //! [`Format::grammar`] derives the tree from the table's rows and the request's tools, one spelling
@@ -24,6 +25,7 @@ use crate::{
 };
 
 mod attributed;
+mod dsml;
 mod gemma;
 mod keyed;
 mod pythonic;
@@ -68,6 +70,17 @@ pub enum Grammar {
     },
     /// One added token by numeric ID: a marker written as that token, never spelled in others.
     Token(u32),
+    /// An added token by spelling, resolved to an ID before backend validation.
+    TokenSpelling(String),
+    /// Free tokens except the named added tokens; ordinary spellings remain text.
+    AnyTokens(Vec<String>),
+    /// Plain tokens ending in a suffix (including tokens merged with free text).
+    TokenSuffix(String),
+    /// A string header, arbitrary plain tokens, and a closing prefix. Lowered
+    /// with the vocabulary so header/data and data/delimiter merges stay valid.
+    TokenSpan { prefix: String, suffix: String },
+    /// JSON whose strings cannot consume a real DSML control token.
+    TokenJson,
     /// Free text until one of `triggers` opens a tag; with `at_least_one`, at least one tag, the
     /// first at once; with `stop_after_first`, nothing after the first tag.
     TriggeredTags {
@@ -174,6 +187,13 @@ impl Grammar {
                 "elements": [begin.to_json(), content.to_json(), end.to_json()],
             }),
             Self::Token(token) => json!({"type": "token", "token": token}),
+            Self::TokenSpelling(token) => json!({"type":"token", "token":token}),
+            Self::AnyTokens(tokens) => json!({"type":"any_tokens", "exclude_tokens":tokens}),
+            Self::TokenSuffix(suffix) => json!({"type":"token_suffix", "suffix":suffix}),
+            Self::TokenSpan { prefix, suffix } => {
+                json!({"type":"token_span", "prefix":prefix, "suffix":suffix})
+            }
+            Self::TokenJson => json!({"type":"token_json"}),
             Self::TriggeredTags {
                 triggers,
                 tags,
@@ -229,7 +249,15 @@ impl Grammar {
     /// long string weighing its length), since the definitions attached to it are copied with it.
     pub(crate) fn nodes(&self) -> usize {
         1 + match self {
-            Self::ConstString(_) | Self::AnyText { .. } | Self::Regex(_) | Self::Token(_) => 0,
+            Self::ConstString(_)
+            | Self::AnyText { .. }
+            | Self::Regex(_)
+            | Self::Token(_)
+            | Self::TokenSpelling(_)
+            | Self::AnyTokens(_)
+            | Self::TokenSuffix(_)
+            | Self::TokenSpan { .. }
+            | Self::TokenJson => 0,
             Self::JsonSchema { schema, .. } => json_nodes(schema) / 4,
             Self::Sequence(elements) | Self::Or(elements) => elements.iter().map(Self::nodes).sum(),
             Self::Optional(content) | Self::Star(content) | Self::Plus(content) => content.nodes(),
@@ -268,6 +296,10 @@ fn bound(grammar: Grammar, tokens: &[MarkerToken]) -> Grammar {
     };
     match grammar {
         Grammar::ConstString(text) => split_tokens(text, tokens),
+        Grammar::TokenSpelling(text) => tokens.iter().find(|token| token.text == text).map_or_else(
+            || Grammar::TokenSpelling(text.clone()),
+            |token| Grammar::Token(token.id),
+        ),
         Grammar::Sequence(elements) => Grammar::Sequence(all(elements)),
         Grammar::Or(elements) => Grammar::Or(all(elements)),
         Grammar::Optional(content) => Grammar::Optional(Box::new(bound(*content, tokens))),
@@ -339,6 +371,10 @@ fn bound(grammar: Grammar, tokens: &[MarkerToken]) -> Grammar {
             }
         }
         leaf @ (Grammar::AnyText { .. }
+        | Grammar::AnyTokens(_)
+        | Grammar::TokenSuffix(_)
+        | Grammar::TokenSpan { .. }
+        | Grammar::TokenJson
         | Grammar::Regex(_)
         | Grammar::JsonSchema { .. }
         | Grammar::Token(_)
@@ -661,8 +697,12 @@ impl Format {
                 let ways_in = self.ways_into(markers.block.as_ref()?.state);
                 (xtml::calls(markers, &ways_in, &named, count)?, false)
             }
+            CallSyntax::Attributed(tags) if tags.typing == Typing::StringAttribute => (
+                dsml::calls(markers?, tags, &named, count, options.reasoning_open)?,
+                false,
+            ),
             CallSyntax::Attributed(tags) => {
-                (attributed::calls(markers?, tags, &named, count)?, true)
+                (attributed::calls(markers?, tags, &named, count), true)
             }
             CallSyntax::Keyed(tags) => {
                 let markers = markers?;
@@ -852,7 +892,13 @@ impl Format {
         let (open, closes) = self.thought_markers(reasoning)?;
         let own: Vec<&str> = std::iter::once(open).chain(closes).collect();
         let excludes = self.excluded_but(&own);
-        Some(Grammar::Sequence(vec![Grammar::AnyText { excludes }, body]))
+        let text = if matches!(self.call_syntax(), Some(CallSyntax::Attributed(tags)) if tags.typing == Typing::StringAttribute)
+        {
+            Grammar::AnyTokens(vec!["｜DSML｜".into()])
+        } else {
+            Grammar::AnyText { excludes }
+        };
+        Some(Grammar::Sequence(vec![text, body]))
     }
 
     /// The thought's opener and the closes the model writes for it. Where the thought closes
@@ -1586,40 +1632,37 @@ mod tests {
         // the syntax's inner tags; nothing is owed at its end; the second element is the tag as
         // derived without it.
         let tools = weather_tools();
-        for (format, excludes) in [
-            (
-                formats::deepseek_v4_1(),
-                value!([
-                    "<｜DSML｜ calls>",
-                    "</｜DSML｜ calls>",
-                    "<｜DSML｜ invoke name=\"",
-                    "</｜DSML｜ invoke>",
-                    "<｜DSML｜ parameter name=\"",
-                    "</｜DSML｜ parameter>",
-                ]),
-            ),
-            (
-                formats::qwen3(CallSyntax::Json),
-                value!(["<tool_call>", "</tool_call>"]),
-            ),
-        ] {
-            let wrapped = format
-                .grammar(&tools, true, true)
-                .expect("a grammar")
-                .to_json();
-            let bare = format
-                .grammar(&tools, true, false)
-                .expect("a grammar")
-                .to_json();
-            assert_eq!(wrapped["type"], "sequence", "{}", format.name());
-            assert_eq!(
-                wrapped["elements"][0],
-                value!({"type": "any_text", "excludes": excludes}),
-                "{}",
-                format.name()
-            );
-            assert_eq!(wrapped["elements"][1], bare, "{}", format.name());
-        }
+        let format = formats::qwen3(CallSyntax::Json);
+        let excludes = value!(["<tool_call>", "</tool_call>"]);
+        let wrapped = format
+            .grammar(&tools, true, true)
+            .expect("a grammar")
+            .to_json();
+        let bare = format
+            .grammar(&tools, true, false)
+            .expect("a grammar")
+            .to_json();
+        assert_eq!(wrapped["type"], "sequence", "{}", format.name());
+        assert_eq!(
+            wrapped["elements"][0],
+            value!({"type": "any_text", "excludes": excludes}),
+            "{}",
+            format.name()
+        );
+        assert_eq!(wrapped["elements"][1], bare, "{}", format.name());
+
+        let dsml = formats::deepseek_v4_1()
+            .grammar(&tools, true, true)
+            .unwrap()
+            .payload();
+        assert_eq!(
+            dsml["format"]["elements"][0],
+            value!({"type":"any_tokens", "exclude_tokens":["｜DSML｜"]})
+        );
+        assert_eq!(
+            dsml["format"]["elements"][1]["elements"][0]["elements"][0]["type"],
+            "token_suffix"
+        );
     }
 
     #[test]
@@ -1879,7 +1922,10 @@ mod tests {
             .grammar(&tools, true, false)
             .expect("a grammar")
             .payload();
-        assert_eq!(as_dsml["format"]["elements"][0]["value"], "\n\n<calls>\n");
+        assert_eq!(
+            as_dsml["format"]["elements"][0]["elements"][0]["value"],
+            "\n\n<calls>\n"
+        );
         let as_xtml = two_doors(CallSyntax::Attributed(AttributedTags::XTML))
             .grammar(&tools, true, false)
             .expect("a grammar")
@@ -1976,65 +2022,27 @@ mod tests {
     }
 
     #[test]
-    fn dsml_derives_the_v41_tag_the_gateway_hand_writes_today() {
-        // The old crate's `DeepSeekDsmlParser::build_v41_structural_tag`: the template's two
-        // newlines, the calls block, one invoke tag per named tool holding any number of parameter
-        // tags, each typed by its `string` attribute, every tag closed with the template's newline.
-        let tools = vec![tool(
-            "get_weather",
-            None,
-            value!({"type": "object", "properties": {"city": {"type": "string"}}}),
-        )];
+    fn dsml_values_use_symbolic_token_grammars_until_the_tokenizer_binds_them() {
         let grammar = formats::deepseek_v4_1()
-            .grammar(&tools, true, false)
-            .expect("a grammar");
-        let parameter = value!({
-            "type": "tag",
-            "begin": "<｜DSML｜ parameter name=\"",
-            "content": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "regex", "pattern": "[^\"]+"},
-                    {"type": "const_string", "value": "\" string=\""},
-                    {"type": "or", "elements": [
-                        {"type": "sequence", "elements": [
-                            {"type": "const_string", "value": "true\">"},
-                            {"type": "any_text", "excludes": [
-                                "</｜DSML｜ parameter>",
-                                "</｜DSML｜ invoke>",
-                                "</｜DSML｜ calls>",
-                            ]},
-                        ]},
-                        {"type": "sequence", "elements": [
-                            {"type": "const_string", "value": "false\">"},
-                            {"type": "json_schema", "json_schema": true},
-                        ]},
-                    ]},
-                ],
-            },
-            "end": "</｜DSML｜ parameter>\n",
-        });
+            .grammar(&weather_tools(), true, false)
+            .unwrap()
+            .payload();
+        let parameter =
+            &grammar["format"]["elements"][1]["content"]["elements"][0]["elements"][1]["content"];
         assert_eq!(
-            grammar.payload(),
-            value!({"format": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "const_string", "value": "\n\n<｜DSML｜ calls>\n"},
-                    {
-                        "type": "tags_with_separator",
-                        "tags": [{
-                            "type": "tag",
-                            "begin": "<｜DSML｜ invoke name=\"get_weather\">\n",
-                            "content": {"type": "star", "content": parameter},
-                            "end": "</｜DSML｜ invoke>\n",
-                        }],
-                        "separator": "",
-                        "at_least_one": true,
-                    },
-                    {"type": "const_string", "value": "</｜DSML｜ calls>"},
-                ],
-            }})
+            parameter["elements"][2]["elements"][0]["elements"][0],
+            value!({
+                "type":"token_span", "prefix":"\" string=\"true\">", "suffix":"</"
+            })
         );
+        assert_eq!(
+            parameter["elements"][2]["elements"][1]["elements"][1]["type"],
+            "token_json"
+        );
+        let mut tokens = Vec::new();
+        nodes_of(&grammar, "token", &mut tokens);
+        assert!(!tokens.is_empty());
+        assert!(tokens.iter().all(|token| token["token"] == "｜DSML｜"));
     }
 
     #[test]
@@ -2445,9 +2453,17 @@ mod tests {
                 .grammar(&tools, true, false)
                 .expect("a grammar")
                 .payload();
+            let expected = if format.name() == "deepseek_v4.1" {
+                let mut one = many.clone();
+                one["format"]["elements"][block] =
+                    many["format"]["elements"][block]["content"].clone();
+                one
+            } else {
+                stopping_at(many, &format!("/format/elements/{block}"))
+            };
             assert_eq!(
                 one_call(&format, &tools, true, false),
-                stopping_at(many, &format!("/format/elements/{block}")),
+                expected,
                 "{}",
                 format.name()
             );
@@ -2908,7 +2924,7 @@ mod tests {
             .grammar(&tools, true, reasoning_open)
             .expect("a tag")
             .payload();
-        assert_eq!(call["format"]["elements"][0]["type"], "any_text");
+        assert_eq!(call["format"]["elements"][0]["type"], "any_tokens");
     }
 
     #[test]

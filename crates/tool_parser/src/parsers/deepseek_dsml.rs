@@ -725,91 +725,70 @@ impl DeepSeekDsmlParser {
         all_calls
     }
 
-    /// The V4.1 tool-call grammar as an xgrammar structural tag, mirroring
-    /// the serving engine's `deepseek_v41` builder for a forced tool choice
-    /// (`tool_choice: required` or a named function): a blank line, the
-    /// `<｜DSML｜ calls>` block, at least one invoke of a listed tool, and the
-    /// block close. Each parameter constrains the DSML syntax only — a
-    /// `string="true"` body is any text without a closing tag, a
-    /// `string="false"` body is any JSON value; parameter names and schemas
-    /// are not lowered (the engine's builder leaves that as a TODO too). `at_least_one` is
-    /// wired to `tool_choice` by the registry; like the Kimi builders,
-    /// `stop_after_first` is left unset so a single listed tool may still be
-    /// called more than once.
+    /// V4.1's single calls block, containing multiple invokes. The symbolic
+    /// token terminals must be resolved against the model tokenizer before
+    /// backend validation. Parameter values distinguish plain marker spellings
+    /// from the real DSML control token, including across merged BPE boundaries.
     pub fn build_v41_structural_tag(tools: &[Tool], at_least_one: bool) -> Value {
-        let dialect = DsmlDialect::V41;
-        let calls_start = format!("<{DSML_TOKEN}{}>", dialect.block());
-        let calls_end = format!("</{DSML_TOKEN}{}>", dialect.block());
-        let invoke_end = format!("</{DSML_TOKEN}{}>", dialect.invoke());
-        let parameter_end = format!("</{DSML_TOKEN}{}>", dialect.parameter());
-
-        let parameter = json!({
-            "type": "tag",
-            "begin": format!("<{DSML_TOKEN}{} name=\"", dialect.parameter()),
-            "content": {
-                "type": "sequence",
-                "elements": [
-                    { "type": "regex", "pattern": "[^\"]+" },
-                    { "type": "const_string", "value": "\" string=\"" },
-                    {
-                        "type": "or",
-                        "elements": [
-                            {
-                                "type": "sequence",
-                                "elements": [
-                                    { "type": "const_string", "value": "true\">" },
-                                    {
-                                        "type": "any_text",
-                                        "excludes": [parameter_end, invoke_end, calls_end],
-                                    },
-                                ],
-                            },
-                            {
-                                "type": "sequence",
-                                "elements": [
-                                    { "type": "const_string", "value": "false\">" },
-                                    { "type": "json_schema", "json_schema": true },
-                                ],
-                            },
-                        ],
-                    },
-                ],
-            },
-            "end": format!("{parameter_end}\n"),
-        });
-
+        let marker = |text: &str| {
+            let mut elements = Vec::new();
+            for (index, text) in text.split(DSML_TOKEN).enumerate() {
+                if index > 0 {
+                    elements.push(json!({"type":"token", "token":DSML_TOKEN}));
+                }
+                if !text.is_empty() {
+                    elements.push(json!({"type":"const_string", "value":text}));
+                }
+            }
+            json!({"type":"sequence", "elements":elements})
+        };
+        let parameter = json!({"type":"sequence", "elements":[
+            marker("<｜DSML｜ parameter name=\""),
+            {"type":"regex", "pattern":"[^\"]+"},
+            {"type":"or", "elements":[
+                {"type":"sequence", "elements":[
+                    {"type":"token_span", "prefix":"\" string=\"true\">", "suffix":"</"},
+                    marker("｜DSML｜ parameter>\n")
+                ]},
+                {"type":"sequence", "elements":[
+                    {"type":"const_string", "value":"\" string=\"false\">"},
+                    {"type":"token_json"},
+                    marker("</｜DSML｜ parameter>\n")
+                ]}
+            ]}
+        ]});
         let invokes: Vec<Value> = tools
             .iter()
             .filter(|tool| !tool.function.name.is_empty())
             .map(|tool| {
-                json!({
-                    "type": "tag",
-                    "begin": format!(
-                        "<{DSML_TOKEN}{} name=\"{}\">\n",
-                        dialect.invoke(),
-                        tool.function.name
-                    ),
-                    "content": { "type": "star", "content": parameter },
-                    "end": format!("{invoke_end}\n"),
-                })
+                json!({"type":"sequence", "elements":[
+                    marker(&format!("<｜DSML｜ invoke name=\"{}\">\n", tool.function.name)),
+                    {"type":"star", "content":parameter},
+                    marker("</｜DSML｜ invoke>\n")
+                ]})
             })
             .collect();
-
-        json!({
-            "format": {
-                "type": "sequence",
-                "elements": [
-                    { "type": "const_string", "value": format!("{V41_BLOCK_SEPARATOR}{calls_start}\n") },
-                    {
-                        "type": "tags_with_separator",
-                        "tags": invokes,
-                        "separator": "",
-                        "at_least_one": at_least_one,
-                    },
-                    { "type": "const_string", "value": calls_end },
-                ],
-            }
-        })
+        let begin = if at_least_one {
+            marker("\n\n<｜DSML｜ calls>\n")
+        } else {
+            json!({"type":"sequence", "elements":[
+                {"type":"token_suffix", "suffix":"<"}, marker("｜DSML｜ calls>\n")
+            ]})
+        };
+        let block = json!({"type":"sequence", "elements":[
+            begin,
+            {"type":"plus", "content":{"type":"or", "elements":invokes}},
+            marker("</｜DSML｜ calls>")
+        ]});
+        let format = if at_least_one {
+            block
+        } else {
+            json!({"type":"sequence", "elements":[
+                {"type":"any_tokens", "exclude_tokens":[DSML_TOKEN]},
+                {"type":"optional", "content":block}
+            ]})
+        };
+        json!({"format":format})
     }
 }
 

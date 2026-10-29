@@ -188,18 +188,27 @@ impl BuildStage for MessageRequestBuildingStage {
                         )
                     })
                     .unwrap_or_default();
-                symphony::auto_constraint_messages(
-                    ctx.state.parser.unwrap_or_default(),
-                    &ctx.components
-                        .parser_resolver
-                        .names(&messages_request.model),
-                    &messages_request,
-                    &tools,
-                    require_reasoning,
-                    continued_final_message,
-                    &ctx.components.templates,
+                utils::continue_prefilled_tool_constraint(
+                    symphony::auto_constraint_messages(
+                        ctx.state.parser.unwrap_or_default(),
+                        &ctx.components
+                            .parser_resolver
+                            .names(&messages_request.model),
+                        &messages_request,
+                        &tools,
+                        require_reasoning,
+                        continued_final_message,
+                        &ctx.components.templates,
+                    )
+                    .map_err(|why| error::bad_request("invalid_parser_configuration", why))?,
+                    ctx.tokenizer_arc()
+                        .ok_or_else(|| {
+                            error::internal_error("missing_tokenizer", "No tokenizer for grammar")
+                        })?
+                        .as_ref(),
+                    false,
                 )
-                .map_err(|why| error::bad_request("invalid_parser_configuration", why))?
+                .map_err(|why| error::bad_request("invalid_tool_constraint", why))?
                 .map(|constraint| constraint.to_tuple())
             }
             other => other,

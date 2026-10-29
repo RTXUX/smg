@@ -17,7 +17,7 @@ inside the markers constrains comes from the call syntax: a JSON object around e
 for the JSON family; the engines' `glm_xml` style of a schema for keyed arguments in the compact
 spelling, and the table's own tags written one pair per property for Ling's newlines and Hy4's
 suffixed tags (the `keyed` module); `<function=` and `<parameter=` tags, one per property, for Qwen
-3.5's and Seed-OSS's tagged syntax (the `tagged` module); a tag grammar per parameter for DSML; for
+3.5's and Seed-OSS's tagged syntax (the `tagged` module); token-aware parameter spans for DSML (the `dsml` module); for
 Kimi K3's XTML, one argument tag per property of the schema (the `xtml` module); `<invoke name="…">`
 blocks of `<parameter name="…">` tags for MiniMax M2 (the `attributed` module); Python calls, one
 per line or as a list, each value in the template's spelling, for Olmo 3 and LFM2.5 (the `pythonic`
@@ -30,7 +30,14 @@ schema accepts, wherever the marker stands in a message. The forced call's forma
 no tag: its constraint is the request's own schema, which the gateway writes. The gateway's old
 parsers wrote these tags
 by hand, one function per parser; where one exists for a format Symphony has, the derived tag is
-pinned to it in the tests, so the switch changes nothing an engine sees.
+pinned to it in the tests. V4.1 requires an additional tokenizer lowering step:
+`token` names, `any_tokens` exclusions, `token_suffix`, `token_span`, and
+`token_json` become numeric token IDs or native XGrammar productions before
+backend validation. The tokenizer caches the plain-vocabulary boundary sets at
+load time. String values allow literal marker spellings and tokens merged with
+the header or closing `</`; JSON values exclude the actual DSML control ID.
+Only one calls block is permitted, with multiple invokes unless `one_call` is
+set. Under auto choice, ordinary content can finish without opening that block.
 
 With the prompt's reasoning still open, the tag is wrapped in a prefix: free text that can write
 none of the table's markers but the thought's own, nor the call syntax's inner tags, with nothing

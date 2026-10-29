@@ -263,6 +263,12 @@ pub trait Tokenizer: Encoder + Decoder {
     fn token_to_id(&self, token: &str) -> Option<TokenIdType>;
     fn id_to_token(&self, id: TokenIdType) -> Option<String>;
 
+    /// Resolve symbolic terminals in a structural tag's `format` against this
+    /// vocabulary before sending it to a backend. Schemas remain opaque.
+    fn resolve_grammar_tokens(&self, format: &mut serde_json::Value) -> Result<()> {
+        crate::grammar::require_resolved(format)
+    }
+
     /// Enable downcasting to concrete types
     fn as_any(&self) -> &dyn std::any::Any;
 

@@ -320,15 +320,24 @@ impl BuildStage for ChatRequestBuildingStage {
                     &processed_messages.text,
                     processed_messages.continued_final_message,
                 );
-                symphony::auto_constraint(
-                    ctx.state.parser.unwrap_or_default(),
-                    &names,
-                    chat_request.as_ref(),
-                    &chat_request.callable_tools(),
-                    reasoning,
-                    &ctx.components.templates,
+                utils::continue_prefilled_tool_constraint(
+                    symphony::auto_constraint(
+                        ctx.state.parser.unwrap_or_default(),
+                        &names,
+                        chat_request.as_ref(),
+                        &chat_request.callable_tools(),
+                        reasoning,
+                        &ctx.components.templates,
+                    )
+                    .map_err(|why| error::bad_request("invalid_parser_configuration", why))?,
+                    ctx.tokenizer_arc()
+                        .ok_or_else(|| {
+                            error::internal_error("missing_tokenizer", "No tokenizer for grammar")
+                        })?
+                        .as_ref(),
+                    false,
                 )
-                .map_err(|why| error::bad_request("invalid_parser_configuration", why))?
+                .map_err(|why| error::bad_request("invalid_tool_constraint", why))?
                 .map(|constraint| constraint.to_tuple())
             }
             other => other,

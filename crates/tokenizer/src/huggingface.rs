@@ -27,6 +27,7 @@ use crate::{
     },
     encode_path::{self, EncodePath},
     encoders::{deepseek_v32, deepseek_v4, deepseek_v41, Prompt, RendererProfile},
+    grammar::GrammarTokens,
     native::NativeEncoder,
     traits::{
         ChatTemplateOutput, DecodeStep, Decoder, EncodeJob, Encoder, Encoding, IncrementalDecoder,
@@ -58,6 +59,7 @@ impl Renderer {
 /// HuggingFace tokenizer wrapper
 pub struct HuggingFaceTokenizer {
     tokenizer: HfTokenizer,
+    grammar_tokens: GrammarTokens,
     special_tokens: SpecialTokens,
     vocab: HashMap<String, TokenIdType>,
     reverse_vocab: HashMap<TokenIdType, String>,
@@ -481,6 +483,7 @@ impl HuggingFaceTokenizer {
             native: encoders.native,
             #[cfg(feature = "tokenizers-v1")]
             v1: encoders.v1,
+            grammar_tokens: GrammarTokens::prepare(&tokenizer),
             tokenizer,
             special_tokens,
             vocab,
@@ -633,6 +636,7 @@ impl HuggingFaceTokenizer {
             native: encoders.native,
             #[cfg(feature = "tokenizers-v1")]
             v1: encoders.v1,
+            grammar_tokens: GrammarTokens::prepare(&tokenizer),
             tokenizer,
             special_tokens,
             vocab,
@@ -1297,6 +1301,10 @@ impl Decoder for HuggingFaceTokenizer {
 }
 
 impl TokenizerTrait for HuggingFaceTokenizer {
+    fn resolve_grammar_tokens(&self, format: &mut serde_json::Value) -> Result<()> {
+        self.grammar_tokens.resolve(&self.tokenizer, format)
+    }
+
     fn vocab_size(&self) -> usize {
         self.tokenizer.get_vocab_size(false)
     }

@@ -21,32 +21,36 @@ use tracing::warn;
 
 use crate::{routers::grpc::context::WorkerSelection, worker::WorkerRegistry};
 
-/// A required V4.1 call starts inside the block the recipe prefills. Remove
-/// that fixed prefix from the constraint before it is stamped for retries.
+/// Resolve grammar token identities and remove a required V4.1 block prefix
+/// already in the prompt. Store this resolved constraint for worker retries.
 pub(crate) fn continue_prefilled_tool_constraint(
     constraint: Option<tool_parser::ToolConstraint>,
     tokenizer: &dyn Tokenizer,
     required: bool,
 ) -> Result<Option<tool_parser::ToolConstraint>, String> {
-    let Some(prefix) = tokenizer
-        .renderer_capabilities()
-        .required_tool_prefix
-        .filter(|_| required)
-    else {
-        return Ok(constraint);
-    };
     let Some(tool_parser::ToolConstraint::StructuralTag(value)) = constraint else {
         return Ok(constraint);
     };
     let mut value: Value = serde_json::from_str(&value).map_err(|e| e.to_string())?;
-    let mut remaining = prefix;
-    consume_tool_prefix(
-        &mut value["format"],
-        &mut remaining,
-        tokenizer.token_to_id("｜DSML｜"),
-    )?;
-    if !remaining.is_empty() {
-        return Err("tool grammar does not contain the rendered prefix".into());
+    if let Some(format) = value.get_mut("format") {
+        tokenizer
+            .resolve_grammar_tokens(format)
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(prefix) = tokenizer
+        .renderer_capabilities()
+        .required_tool_prefix
+        .filter(|_| required)
+    {
+        let mut remaining = prefix;
+        consume_tool_prefix(
+            &mut value["format"],
+            &mut remaining,
+            tokenizer.token_to_id("｜DSML｜"),
+        )?;
+        if !remaining.is_empty() {
+            return Err("tool grammar does not contain the rendered prefix".into());
+        }
     }
     Ok(Some(tool_parser::ToolConstraint::StructuralTag(
         value.to_string(),
@@ -714,25 +718,84 @@ pub(crate) fn create_tool_parser(
 #[cfg(test)]
 mod tests {
     #[test]
+    #[expect(
+        clippy::print_stderr,
+        reason = "diagnose optional production tokenizer fixture"
+    )]
     fn prefilled_dsml_constraints_keep_multiple_invokes_and_only_one_close() {
-        let tools = vec![serde_json::from_value(serde_json::json!({"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}})).unwrap()];
-        let legacy =
-            tool_parser::parsers::DeepSeekDsmlParser::build_v41_structural_tag(&tools, true);
-        let format = symphony::formats::deepseek_v4_1()
-            .marker_tokens([symphony::MarkerToken::new("｜DSML｜", 128825)]);
-        let bound = format.grammar(&tools, true, false).unwrap().payload();
-        let mut fixtures = Vec::new();
-        for mut grammar in [legacy, bound] {
-            fixtures.push(serde_json::json!({"prefilled":false,"grammar":grammar}));
-            let mut prefix = "\n\n<｜DSML｜ calls>\n";
-            consume_tool_prefix(&mut grammar["format"], &mut prefix, Some(128825)).unwrap();
-            assert!(prefix.is_empty());
-            let encoded = grammar.to_string();
-            assert!(!encoded.contains("\\n\\n<｜DSML｜ calls>"));
-            assert!(encoded.contains("lookup"));
-            assert!(!encoded.contains("\"stop_after_first\":true"));
-            fixtures.push(serde_json::json!({"prefilled":true,"grammar":grammar}));
+        let directory = std::env::var_os("DEEPSEEK_V41_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../crates/tokenizer/.tokenizer_cache/deepseek_v41")
+            });
+        let path = directory.join("tokenizer.json");
+        if !path.exists() {
+            assert!(
+                std::env::var_os("SMG_V41_GRAMMARS_OUT").is_none(),
+                "grammar export requires the production tokenizer"
+            );
+            eprintln!("skipping grammar token check: set DEEPSEEK_V41_MODEL_DIR");
+            return;
         }
+        let tokenizer =
+            llm_tokenizer::HuggingFaceTokenizer::from_file(path.to_str().unwrap()).unwrap();
+        let tools = vec![serde_json::from_value(serde_json::json!({"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}})).unwrap()];
+        let format =
+            symphony::formats::deepseek_v4_1().marker_tokens([symphony::MarkerToken::new(
+                "｜DSML｜",
+                tokenizer.token_to_id("｜DSML｜").unwrap(),
+            )]);
+        let mut fixtures = Vec::new();
+        for required in [true, false] {
+            for one_call in [false, true] {
+                let mut sources = vec![(
+                    "symphony",
+                    format
+                        .grammar_for(
+                            &tools,
+                            Options {
+                                at_least_one: required,
+                                reasoning_open: false,
+                                one_call,
+                            },
+                        )
+                        .unwrap()
+                        .payload(),
+                )];
+                if !one_call {
+                    sources.push((
+                        "legacy",
+                        tool_parser::parsers::DeepSeekDsmlParser::build_v41_structural_tag(
+                            &tools, required,
+                        ),
+                    ));
+                }
+                for (source, grammar) in sources {
+                    for prefilled in [false, true] {
+                        if prefilled && !required {
+                            continue;
+                        }
+                        let constraint = continue_prefilled_tool_constraint(
+                            Some(ToolConstraint::StructuralTag(grammar.to_string())),
+                            &tokenizer,
+                            prefilled,
+                        )
+                        .unwrap()
+                        .unwrap();
+                        let ToolConstraint::StructuralTag(resolved) = constraint else {
+                            panic!("structural tag")
+                        };
+                        let resolved: Value = serde_json::from_str(&resolved).unwrap();
+                        fixtures.push(serde_json::json!({"source":source,"required":required,
+                            "one_call":one_call,"prefilled":prefilled,"grammar":resolved}));
+                    }
+                }
+            }
+        }
+        // Both frontend paths lower the same symbolic DSML syntax.
+        assert_eq!(fixtures[0]["grammar"], fixtures[2]["grammar"]);
+        assert_eq!(fixtures[1]["grammar"], fixtures[3]["grammar"]);
         if let Ok(path) = std::env::var("SMG_V41_GRAMMARS_OUT") {
             std::fs::write(path, serde_json::to_vec_pretty(&fixtures).unwrap()).unwrap();
         }
@@ -741,6 +804,7 @@ mod tests {
 
     use llm_multimodal::MediaPartOrder;
     use openai_protocol::common::{Tool, ToolChoice, ToolChoiceValue};
+    use symphony::grammar::Options;
     use tool_parser::ToolConstraint;
 
     use super::*;

@@ -138,7 +138,7 @@ impl Default for EncodeParams {
     fn default() -> Self {
         Self {
             add_default_bos_token: true,
-            drop_thinking: true,
+            drop_thinking: false,
             reasoning_effort: None,
             effort_encoding: EffortEncoding::Original,
         }

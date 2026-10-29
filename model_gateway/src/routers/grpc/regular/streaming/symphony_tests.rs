@@ -48,6 +48,7 @@ pub(super) fn assigned(
         format: Arc::new(format),
         prompt: prompt.to_string(),
         forbids_calls: false,
+        prompt_token_ids: Vec::new(),
     });
     spec
 }
@@ -695,6 +696,7 @@ pub(super) fn assigned_message(
             format: Arc::new(format),
             prompt: prompt.to_string(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         }),
     }
 }

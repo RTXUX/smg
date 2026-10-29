@@ -280,6 +280,7 @@ pub(crate) fn decide(
     asks: Asks<'_>,
     declared: &[Tool],
     processed_text: &str,
+    prompt_token_ids: &[u32],
     prepared: PreparedConstraint,
     auto: impl FnOnce(&RequestContext) -> Auto,
 ) -> Result<Decided, Response> {
@@ -332,6 +333,10 @@ pub(crate) fn decide(
         &ctx.components.templates,
     )
     .map_err(|why| error::bad_request("invalid_parser_configuration", why))?;
+    let assignment = assignment
+        .map(|assignment| assignment.bind_prompt(processed_text, prompt_token_ids))
+        .transpose()
+        .map_err(|why| error::bad_request("invalid_parser_configuration", why))?;
     ctx.state.parser = Some(match assignment {
         Some(_) => ParserChoice::Symphony,
         None => ParserChoice::Legacy,
@@ -370,9 +375,15 @@ mod tests {
     /// policy is `requested`; no `auto` tag is derived.
     fn decided(ctx: &mut RequestContext, asks: Asks<'_>) -> Outcome {
         ctx.state.parser = Some(ParserChoice::Symphony);
-        let decided = decide(ctx, asks, &[], PROMPT, Ok(symphony::Prepared::None), |_| {
-            panic!("the policy is requested: no auto tag")
-        })
+        let decided = decide(
+            ctx,
+            asks,
+            &[],
+            PROMPT,
+            &[],
+            Ok(symphony::Prepared::None),
+            |_| panic!("the policy is requested: no auto tag"),
+        )
         .map_err(|response| response.status())
         .expect("nothing refused");
         assert!(!decided.whole_turn && decided.table_tag.is_none());

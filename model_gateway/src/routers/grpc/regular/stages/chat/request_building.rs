@@ -169,6 +169,7 @@ impl ChatRequestBuildingStage {
             symphony::Asks::Chat(&chat_request),
             &chat_request.effective_tool_list(),
             &processed_messages.text,
+            &token_ids,
             tool_constraints,
             |ctx| {
                 let (reasoning_open, thought_closed) = reasoning_decision(

@@ -205,7 +205,7 @@ pub(super) fn reading(
             templates.format(model).map_err(SymphonyError::Template)?,
             true,
         ),
-        Decision::Table(format) => Reading::Table(format, false),
+        Decision::Table(format) => Reading::Table(templates.bind(model, format), false),
         Decision::Legacy(why) => Reading::Fallback(why),
     })
 }

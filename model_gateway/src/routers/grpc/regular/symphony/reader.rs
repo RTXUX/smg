@@ -34,6 +34,7 @@ pub(crate) struct Assignment {
     /// The table, shared with every reader of the response and every request it reads for.
     pub format: Arc<Format>,
     pub prompt: String,
+    pub prompt_token_ids: Vec<u32>,
     /// The request forbade the calls the table reads (`tool_choice: none`,
     /// [`Asks::forbids_calls`]): the reader drops every call, as the engine's own server reads
     /// such a call and withholds it.
@@ -41,6 +42,17 @@ pub(crate) struct Assignment {
 }
 
 impl Assignment {
+    /// Keep the prompt bytes and IDs on the same replay boundary.
+    pub(crate) fn bind_prompt(mut self, prompt: &str, ids: &[u32]) -> Result<Self, SymphonyError> {
+        let (prompt, from) = self
+            .format
+            .replay_tokenized(prompt, ids)
+            .map_err(SymphonyError::Read)?;
+        self.prompt = prompt.to_owned();
+        self.prompt_token_ids = ids[from.unwrap_or(0)..].to_vec();
+        Ok(self)
+    }
+
     /// The `table` label of the format, for the counters and the lines.
     pub(crate) fn table(&self) -> &'static str {
         telemetry::table_label(self.format.name())
@@ -60,6 +72,7 @@ pub(super) fn assignment(
         format,
         prompt,
         forbids_calls,
+        prompt_token_ids: Vec::new(),
     }
 }
 
@@ -336,7 +349,7 @@ impl Reader {
         let mut replayed = Events::new();
         reader.feed(
             Input::Prompt {
-                token_ids: &[],
+                token_ids: &assignment.prompt_token_ids,
                 text: &assignment.prompt,
             },
             &mut replayed,
@@ -720,6 +733,7 @@ mod tests {
             format: Arc::new(format),
             prompt: prompt.to_string(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         // A step's events borrow its delta, as a stream's do: each piece is a step of its own,
         // its events taken owned before the next.
@@ -1795,6 +1809,7 @@ mod tests {
             format: Arc::new(symphony::formats::inkling().without_calls()),
             prompt: "<|message_model|>".to_string(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         let json = "{\"city\": \"Oslo\", \"country\": \"Norway\"}";
         let thought = "<|content_thinking|>plan<|end_message|><|message_model|><|content_text|>";
@@ -1866,6 +1881,7 @@ mod tests {
             format: Arc::new(glm4()),
             prompt: GLM4_PROMPT.to_string(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         let pieces = [
             "\n<think></think>\n<tool_call>answer_string\n<arg_key>answer</arg_key>\n<arg_value>",
@@ -1922,6 +1938,7 @@ mod tests {
             format: Arc::new(qwen3(CallSyntax::Json)),
             prompt: String::new(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         let mut events = Events::new();
         let mut reader = Reader::new(&assignment, Arc::default(), &mut events).expect("a reader");
@@ -1944,6 +1961,7 @@ mod tests {
             format: Arc::new(qwen3(CallSyntax::Json)),
             prompt: String::new(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         let tokenizer: Arc<dyn Tokenizer> = Arc::new(Refusing::default());
         let mut decoder = StopSequenceDecoder::new(
@@ -2068,6 +2086,7 @@ mod tests {
             format: Arc::new(qwen3(CallSyntax::Json)),
             prompt: "<|im_start|>assistant\n".to_string(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         let calls = |first_only: bool| {
             let mut events = Events::new();
@@ -2098,6 +2117,7 @@ mod tests {
             format: Arc::new(qwen3(CallSyntax::Json)),
             prompt: String::new(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         let first_run_at = |steps: &[&str]| -> (Option<usize>, usize) {
             let mut events = Events::new();
@@ -2145,6 +2165,7 @@ mod tests {
             format: Arc::new(symphony::formats::json().without_calls()),
             prompt: String::new(),
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
         };
         let mut events = Events::new();
         let mut reader = Reader::new(&assignment, Arc::default(), &mut events).expect("a reader");
@@ -2178,6 +2199,7 @@ mod tests {
             format: Arc::new(qwen3(CallSyntax::Json)),
             prompt: "<|im_start|>assistant\n".to_string(),
             forbids_calls: true,
+            prompt_token_ids: Vec::new(),
         };
         let mut events = Vec::new();
         let scrape = rendered(|| {
@@ -2227,6 +2249,7 @@ mod tests {
         // The same output under `auto` is a call: the ask, not the table, decides.
         let allowed = Assignment {
             forbids_calls: false,
+            prompt_token_ids: Vec::new(),
             ..assignment
         };
         let mut out = Events::new();
@@ -2420,6 +2443,7 @@ mod tests {
                 format: Arc::new(format),
                 prompt: prompt.to_string(),
                 forbids_calls: false,
+                prompt_token_ids: Vec::new(),
             };
             let mut replayed = Events::new();
             let mut reader =
@@ -2611,5 +2635,63 @@ mod tests {
         )
         .expect("the outputs counter");
         assert!(outputs.ends_with(" 1"), "{outputs}");
+    }
+    #[tokio::test]
+    async fn deepseek_marker_ids_bind_grammar_and_prompt_replay() {
+        let model = "deepseek-ai/DeepSeek-V4.1-Flash";
+        let tokenizer = llm_tokenizer::MockTokenizer::new().with_added_tokens(&[
+            ("｜DSML｜", 128825),
+            ("<｜Assistant｜>", 128804),
+            ("</think>", 128822),
+        ]);
+        let templates = template::fixtures::templates_with(model, Arc::new(tokenizer)).await;
+        let request = request(json!({"model": model, "tools": tools(), "tool_choice": "required"}));
+        let names = names(None, None);
+        let constraint = super::super::constraint(
+            ParserChoice::Symphony,
+            &names,
+            Asks::Chat(&request),
+            &tools(),
+            false,
+            false,
+            symphony::GrammarStart::Unknown,
+            TagVocabulary::Current,
+            &templates,
+        )
+        .unwrap()
+        .for_start(symphony::GrammarStart::Unknown, TagVocabulary::Current)
+        .unwrap()
+        .unwrap();
+        let ToolConstraint::StructuralTag(tag) = constraint else {
+            panic!("a structural tag");
+        };
+        assert!(tag.contains("\"token\":128825"), "{tag}");
+        let assigned = super::assign(
+            ParserChoice::Symphony,
+            &names,
+            Asks::Chat(&request),
+            None,
+            "<｜Assistant｜></think>",
+            &templates,
+        )
+        .unwrap()
+        .unwrap();
+        let again = super::assign(
+            ParserChoice::Symphony,
+            &names,
+            Asks::Chat(&request),
+            None,
+            "<｜Assistant｜></think>",
+            &templates,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(Arc::ptr_eq(&assigned.format, &again.format));
+        let assigned = assigned
+            .bind_prompt("<｜Assistant｜></think>", &[128804, 128822])
+            .unwrap();
+        assert_eq!(assigned.prompt_token_ids, [128804, 128822]);
+        let mut events = Events::new();
+        Reader::new(&assigned, tools().into(), &mut events).expect("tokenized prompt replay");
     }
 }

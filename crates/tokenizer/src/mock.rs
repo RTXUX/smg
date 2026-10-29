@@ -209,6 +209,22 @@ impl MockTokenizer {
         self
     }
 
+    /// Add `(token, id)` pairs to the vocabulary and the added-special-token list.
+    pub fn with_added_tokens(mut self, tokens: &[(&str, u32)]) -> Self {
+        for &(token, _) in tokens {
+            if !self
+                .special_tokens
+                .additional_special_tokens
+                .contains(&token.to_string())
+            {
+                self.special_tokens
+                    .additional_special_tokens
+                    .push(token.to_string());
+            }
+        }
+        self.with_tokens(tokens)
+    }
+
     /// Name `text` as the end-of-sequence token: the one `eos_token_ids` reports, in the
     /// vocabulary under the `<eos>` id.
     pub fn with_eos_token(mut self, text: &str) -> Self {

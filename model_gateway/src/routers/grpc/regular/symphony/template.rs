@@ -43,11 +43,18 @@ use tracing::info;
 pub(crate) struct Templates {
     tokenizers: Arc<TokenizerRegistry>,
     compiled: RwLock<HashMap<String, Entry>>,
+    bound: RwLock<HashMap<String, BoundEntry>>,
     hidden: RwLock<HashMap<String, Hidden>>,
 }
 
 /// What a model's tokenizer compiled into, bound to that tokenizer: the table, shared with every
 /// request and engine that reads with it.
+struct BoundEntry {
+    tokenizer: Weak<dyn Tokenizer>,
+    base: Arc<Format>,
+    table: Arc<Format>,
+}
+
 struct Entry {
     tokenizer: Weak<dyn Tokenizer>,
     table: Result<Arc<Format>, String>,
@@ -66,6 +73,7 @@ impl Templates {
         Self {
             tokenizers,
             compiled: RwLock::default(),
+            bound: RwLock::default(),
             hidden: RwLock::default(),
         }
     }
@@ -133,6 +141,29 @@ impl Templates {
             Entry {
                 tokenizer: current,
                 table: table.clone(),
+            },
+        );
+        table
+    }
+
+    /// Bind a registry table once per tokenizer and table, keeping shared variants usable.
+    pub(crate) fn bind(&self, model: &str, base: Arc<Format>) -> Arc<Format> {
+        let Some(tokenizer) = self.tokenizers.get(model) else {
+            return base;
+        };
+        let current = Arc::downgrade(&tokenizer);
+        if let Some(entry) = self.bound.read().get(model) {
+            if entry.tokenizer.ptr_eq(&current) && Arc::ptr_eq(&entry.base, &base) {
+                return Arc::clone(&entry.table);
+            }
+        }
+        let table = Arc::new((*base).clone().marker_tokens(self.marker_tokens(model)));
+        self.bound.write().insert(
+            model.to_owned(),
+            BoundEntry {
+                tokenizer: current,
+                base,
+                table: Arc::clone(&table),
             },
         );
         table

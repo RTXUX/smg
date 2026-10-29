@@ -155,6 +155,7 @@ impl BuildStage for MessageRequestBuildingStage {
             },
             &spec.chat_tools,
             &processed_messages.text,
+            &token_ids,
             tool_constraints,
             |_| {
                 // The tag shares the spec's tools where `tool_choice` narrows

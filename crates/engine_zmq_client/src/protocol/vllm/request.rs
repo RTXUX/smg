@@ -128,8 +128,10 @@ pub struct EngineCoreRequest {
     /// In DP mode, the wave this request is expected to belong to.
     #[serde(default)]
     pub current_wave: u32,
+    // Python uses an unbounded int. Widen before negating the gateway's i32
+    // priority so i32::MIN round-trips without overflow or saturation.
     #[serde(default)]
-    pub priority: i32,
+    pub priority: i64,
     #[serde(default)]
     pub trace_headers: Option<BTreeMap<String, String>>,
     #[serde(default)]
@@ -253,6 +255,7 @@ mod tests {
             }),
             arrival_time: 1234.5,
             client_index: 7,
+            priority: -i64::from(i32::MIN),
             ..EngineCoreRequest::default()
         };
 
@@ -270,6 +273,7 @@ mod tests {
         assert_eq!(array[4], Value::Nil); // pooling_params
         assert_eq!(array[10], Value::Nil); // prompt_is_token_ids
         assert_eq!(array[11], Value::from(7)); // client_index
+        assert_eq!(array[13], Value::from(2_147_483_648_i64)); // priority
     }
 
     /// A pooling request carries typed `pooling_params` at position 4 and no

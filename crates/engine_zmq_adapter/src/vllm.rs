@@ -690,6 +690,7 @@ pub(crate) fn translate_request_with_media(
         )),
     };
     Ok(EngineCoreRequest {
+        priority: -i64::from(req.priority),
         request_id: req.request_id,
         prompt_token_ids,
         mm_features,

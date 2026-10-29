@@ -46,6 +46,7 @@ pub fn translate_embed_request(
         ));
     }
     Ok(EngineCoreRequest {
+        priority: -i64::from(req.priority),
         request_id: req.request_id,
         prompt_token_ids: Some(tokenized.input_ids),
         sampling_params: None,
@@ -158,6 +159,7 @@ mod tests {
     fn embed_request(id: &str, input_ids: Vec<u32>) -> vllm::EmbedRequest {
         vllm::EmbedRequest {
             request_id: id.to_string(),
+            priority: 0,
             tokenized: Some(vllm::TokenizedInput {
                 original_text: String::new(),
                 input_ids,
@@ -171,6 +173,7 @@ mod tests {
         let untokenized = vllm::EmbedRequest {
             request_id: "e".to_string(),
             tokenized: None,
+            ..Default::default()
         };
         let error = translate_embed_request(untokenized, params(), 512).unwrap_err();
         assert!(error.contains("tokenized"), "{error}");

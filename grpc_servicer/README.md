@@ -36,6 +36,21 @@ pip install smg-grpc-servicer[sglang]
 vllm serve meta-llama/Llama-2-7b-hf --grpc
 ```
 
+#### Numeric request priority
+
+Send `x-dynamo-request-priority: 10` to SMG to pass numeric priority to vLLM.
+The header follows Dynamo's signed 32-bit integer contract: larger values
+are more urgent; whitespace is accepted, and malformed or out-of-range values
+are ignored. The default is zero. This is separate from the `x-smg-priority`
+admission class (`system`, `interactive`, `default`, or `bulk`).
+
+The vLLM gRPC `GenerateRequest.priority` and `EmbedRequest.priority` carry the
+header value unchanged. Both Python and Rust servicers negate it once before
+submitting to vLLM, whose smaller numeric priority is more urgent: `10` becomes
+`-10`, and `-3` becomes `3`. Configure vLLM with `--scheduling-policy priority`
+to enable priority scheduling. The header survives batches, prefill/decode
+splits, retries, and Responses tool iterations, including background work.
+
 Without `--kv-events-config`, the servicer turns vLLM's ZMQ KV-event publisher
 on by itself, under either implementation, before the engine is built, at a
 port found free on the host rather than vLLM's fixed default (one per

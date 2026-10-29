@@ -497,6 +497,7 @@ impl GrpcRouter {
                         harmony_pipeline,
                         harmony_responses_context,
                         request_context,
+                        headers,
                     )
                 } else {
                     ResponsesContext {
@@ -528,6 +529,7 @@ impl GrpcRouter {
                 harmony_pipeline,
                 harmony_responses_context,
                 smg_data_connector::current_request_context(),
+                headers,
             );
 
             if body.stream.unwrap_or(false) {
@@ -558,8 +560,9 @@ impl GrpcRouter {
         harmony_pipeline: &RequestPipeline,
         harmony_responses_context: &ResponsesContext,
         request_context: Option<smg_data_connector::RequestContext>,
+        headers: Option<&HeaderMap>,
     ) -> ResponsesContext {
-        ResponsesContext::new(
+        let mut context = ResponsesContext::new(
             Arc::new(harmony_pipeline.clone()),
             self.shared_components.clone(),
             harmony_responses_context.response_storage.clone(),
@@ -569,7 +572,9 @@ impl GrpcRouter {
             harmony_responses_context.mcp_format_registry.clone(),
             request_context,
             harmony_responses_context.background.clone(),
-        )
+        );
+        context.headers = headers.cloned();
+        context
     }
 
     /// `background: true`: the `queued` Response object is stored under a new

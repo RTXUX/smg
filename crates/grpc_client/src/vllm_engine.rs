@@ -68,6 +68,7 @@ impl VllmEngineClient {
             mm_inputs,
             media_refs: None,
             extra_mm_inputs: Vec::new(),
+            priority: 0,
         }
     }
 
@@ -419,6 +420,7 @@ impl VllmEngineClient {
     ) -> proto::EmbedRequest {
         proto::EmbedRequest {
             request_id,
+            priority: 0,
             tokenized: Some(proto::TokenizedInput {
                 original_text: original_text.unwrap_or_default(),
                 input_ids: token_ids,
@@ -640,6 +642,7 @@ mod tests {
             mm_inputs: None,
             media_refs: None,
             extra_mm_inputs: Vec::new(),
+            priority: 0,
         };
 
         assert_eq!(gen_req.request_id, "test-req-123");
@@ -833,6 +836,7 @@ mod tests {
     #[test]
     fn test_embed_request() {
         let embed_req = proto::EmbedRequest {
+            priority: 0,
             request_id: "embed-req-202".to_string(),
             tokenized: Some(proto::TokenizedInput {
                 original_text: "This is a test sentence for embedding".to_string(),

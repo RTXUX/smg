@@ -179,9 +179,8 @@ fn deepseek_v41_render_text_matches_reference_fixtures_and_vendor_token_ids() {
             case.oracle
         );
         assert!(
-            matches!(rendered.encoding, PromptEncoding::FromText),
-            "case {name}: the V4.1 renderer encodes from its text, got {:?}",
-            rendered.encoding
+            matches!(rendered.encoding, PromptEncoding::Deferred(_)),
+            "case {name}: V4.1 uses deferred provenance-aware encoding"
         );
 
         // A native effort name alone switches thinking on: the same request
@@ -214,9 +213,11 @@ fn deepseek_v41_render_text_matches_reference_fixtures_and_vendor_token_ids() {
             string_budget_second_render = true;
         }
 
-        let encoded = tok
-            .encode(&rendered.text, false)
-            .unwrap_or_else(|e| panic!("case {name}: encode failed: {e}"));
+        let encoded = match rendered.encoding {
+            PromptEncoding::Deferred(job) => job.run(),
+            PromptEncoding::FromText => tok.encode(&rendered.text, false),
+        }
+        .unwrap_or_else(|e| panic!("case {name}: encode failed: {e}"));
         assert_eq!(
             encoded.token_ids(),
             expected.ids.as_slice(),

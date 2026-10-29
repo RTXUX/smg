@@ -14,7 +14,7 @@ use tokenizers::{
     },
     processors::template::TemplateProcessing,
     tokenizer::{SplitDelimiterBehavior, Tokenizer as HfTokenizer},
-    AddedToken,
+    AddedToken, AddedVocabulary,
 };
 use tracing::debug;
 
@@ -26,10 +26,10 @@ use crate::{
         ChatTemplateState, ThinkingKeyName, ThinkingToggle,
     },
     encode_path::{self, EncodePath},
-    encoders::{deepseek_v32, deepseek_v4, deepseek_v41, RendererProfile},
+    encoders::{deepseek_v32, deepseek_v4, deepseek_v41, Prompt, RendererProfile},
     native::NativeEncoder,
     traits::{
-        ChatTemplateOutput, DecodeStep, Decoder, Encoder, Encoding, IncrementalDecoder,
+        ChatTemplateOutput, DecodeStep, Decoder, EncodeJob, Encoder, Encoding, IncrementalDecoder,
         PromptEncoding, SpecialTokens, TokenIdType, Tokenizer as TokenizerTrait,
     },
 };
@@ -1366,6 +1366,24 @@ impl TokenizerTrait for HuggingFaceTokenizer {
         // appended its text after the generation prompt; the native encoders
         // continue it whenever they are asked to (V4.1) or are never asked.
         let continue_final_message = params.continue_final_message;
+        if matches!(self.renderer, Renderer::DeepseekV41) {
+            let mut prompt = render_deepseek_v41(messages, &params)?;
+            if let Some(prefix) = assistant_prefix {
+                prompt.push_plain(prefix);
+            }
+            let (text, special_ranges) = prompt.into_parts();
+            let tokenizer = self.tokenizer.clone();
+            let encoded_text = text.clone();
+            let job = EncodeJob::new(move || {
+                encode_segmented_prompt(&tokenizer, &encoded_text, &special_ranges)
+            });
+            return Ok(ChatTemplateOutput {
+                text,
+                encoding: PromptEncoding::Deferred(job),
+                unbilled_prompt_tokens: 0,
+                continued_final_message: continue_final_message,
+            });
+        }
         let (mut text, continued_final_message) = match self.renderer {
             Renderer::Jinja => self.apply_jinja(messages, params)?,
             _ => (
@@ -1802,10 +1820,10 @@ fn restore_integer_reasoning_effort(value: &serde_json::Value) -> Option<serde_j
 /// switch value reaches `parse_reasoning_effort` (which rejects both, as the
 /// reference does) and both leave the effort unset, so a thinking-mode prompt
 /// carries the default budget.
-fn apply_deepseek_v41(
+fn render_deepseek_v41(
     messages: &[serde_json::Value],
     params: &ChatTemplateParams,
-) -> Result<String> {
+) -> Result<Prompt> {
     // `template_kwargs["response_format"]` is deliberately not attached to a
     // message: the engine's Python renderer never renders V4.1's `## Response Format:` block
     // (structured output is enforced by the constraint), so the gateway's
@@ -1877,8 +1895,62 @@ fn apply_deepseek_v41(
         drop_thinking,
         reasoning_effort,
     };
-    deepseek_v41::encode_messages(&msgs, thinking_mode, &encode_params)
+    deepseek_v41::render_messages(&msgs, thinking_mode, &encode_params)
         .map_err(|e| Error::msg(format!("DeepSeek V4.1 encode failed: {e}")))
+}
+
+/// Encode with the flat tokenizer to preserve its exact BPE boundaries, then replace only
+/// added-token occurrences outside the renderer's explicit special ranges with plain token IDs.
+fn encode_segmented_prompt(
+    tokenizer: &HfTokenizer,
+    text: &str,
+    special_ranges: &[std::ops::Range<usize>],
+) -> Result<Encoding> {
+    let flat = tokenizer
+        .encode(text, false)
+        .map_err(|e| Error::msg(format!("DeepSeek V4.1 encode failed: {e}")))?;
+    let mut plain = tokenizer.clone();
+    plain.with_added_vocabulary(AddedVocabulary::new());
+    let added = tokenizer.get_added_vocabulary();
+    let added = added.get_added_tokens_decoder();
+    let mut covered = vec![false; special_ranges.len()];
+    let mut ids = Vec::with_capacity(flat.get_ids().len());
+    for (&id, &(start, end)) in flat.get_ids().iter().zip(flat.get_offsets()) {
+        if !added.contains_key(&id) {
+            ids.push(id);
+            continue;
+        }
+        if let Some(index) = special_ranges
+            .iter()
+            .position(|range| range.start == start && range.end == end)
+        {
+            covered[index] = true;
+            ids.push(id);
+        } else {
+            let literal = &text[start..end];
+            let encoding = plain.encode(literal, false).map_err(|e| {
+                Error::msg(format!(
+                    "DeepSeek V4.1 plain-text encode failed for {literal:?}: {e}"
+                ))
+            })?;
+            ids.extend_from_slice(encoding.get_ids());
+        }
+    }
+    if let Some(missing) = covered.iter().position(|covered| !covered) {
+        let range = &special_ranges[missing];
+        let token = &text[range.clone()];
+        return Err(Error::msg(format!(
+            "DeepSeek V4.1 special token {token:?} did not encode as one added token"
+        )));
+    }
+    Ok(Encoding::Plain(ids))
+}
+
+fn apply_deepseek_v41(
+    messages: &[serde_json::Value],
+    params: &ChatTemplateParams,
+) -> Result<String> {
+    render_deepseek_v41(messages, params).map(|prompt| prompt.into_parts().0)
 }
 
 #[cfg(test)]

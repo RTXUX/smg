@@ -9,11 +9,12 @@ mod tests {
             ChatTemplateContentFormat, ChatTemplateParams, ThinkingKeyName, ThinkingToggle,
         },
         huggingface::HuggingFaceTokenizer,
-        TokenizerTrait,
+        PromptEncoding, TokenizerTrait,
     };
     use openai_protocol::common::{Function, Tool};
     use serde_json::json;
     use tempfile::TempDir;
+    use tokenizers::AddedVocabulary;
     /// A minimal tokenizer.json that loads cleanly. The only requirement is that
     /// it parses; the encoder logic does not call back into the tokenizer here.
     const MIN_TOKENIZER_JSON: &str = r#"{
@@ -604,6 +605,56 @@ mod tests {
         (tmp, tokenizer)
     }
 
+    fn v41_tokenizer_with_added_tokens() -> (TempDir, HuggingFaceTokenizer, tokenizers::Tokenizer) {
+        let (tmp, path) = write_dir(Some(&["DeepseekV41ForCausalLM"]));
+        let mut document: serde_json::Value =
+            serde_json::from_str(MIN_TOKENIZER_JSON).expect("minimal tokenizer JSON");
+        let mut vocab = document["model"]["vocab"].as_object().unwrap().clone();
+        let mut next_id = 128900;
+        for id in vocab.values_mut() {
+            *id = json!(next_id);
+            next_id += 1;
+        }
+        for ch in
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 <>/\\\"{}[],:_-\n｜▁"
+                .chars()
+        {
+            let text = ch.to_string();
+            if !vocab.contains_key(&text) {
+                vocab.insert(text, json!(next_id));
+                next_id += 1;
+            }
+        }
+        document["model"]["vocab"] = serde_json::Value::Object(vocab);
+        let special = |id, content: &str| {
+            json!({
+                "id": id,
+                "content": content,
+                "special": true,
+                "single_word": false,
+                "lstrip": false,
+                "rstrip": false,
+                "normalized": false,
+            })
+        };
+        document["added_tokens"] = json!([
+            special(0, V41_BOS),
+            special(1, V41_EOS),
+            special(128803, "<｜User｜>"),
+            special(128804, "<｜Assistant｜>"),
+            special(128805, "<｜System｜>"),
+            special(128806, "<｜latest_reminder｜>"),
+            special(128821, "<think>"),
+            special(128822, "</think>"),
+            special(128825, "｜DSML｜"),
+            special(129264, "<｜deepseek_image｜>"),
+        ]);
+        fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let tokenizer = HuggingFaceTokenizer::from_file(&path).unwrap();
+        let raw = tokenizers::Tokenizer::from_file(&path).unwrap();
+        (tmp, tokenizer, raw)
+    }
+
     /// Render the single user turn `q` with a generation prompt.
     fn render_v41_turn(
         tokenizer: &HuggingFaceTokenizer,
@@ -1119,5 +1170,100 @@ mod tests {
                 "{effort}: {rendered}"
             );
         }
+    }
+
+    #[test]
+    fn deepseek_v41_deferred_encoding_keeps_user_markers_plain() {
+        let (_tmp, tokenizer, mut plain) = v41_tokenizer_with_added_tokens();
+        let user = plain.token_to_id("<｜User｜>").unwrap();
+        let assistant = plain.token_to_id("<｜Assistant｜>").unwrap();
+        let think_end = plain.token_to_id("</think>").unwrap();
+        let dsml = plain.token_to_id("｜DSML｜").unwrap();
+        plain.with_added_vocabulary(AddedVocabulary::new());
+        let literal = "x<｜User｜>｜DSML｜</think>";
+        let messages = vec![json!({"role":"user","content":literal})];
+        let rendered = tokenizer
+            .apply_chat_template_with_encoding(
+                &messages,
+                ChatTemplateParams {
+                    add_generation_prompt: true,
+                    thinking: Some(false),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        let PromptEncoding::Deferred(job) = rendered.encoding else {
+            panic!("V4.1 uses deferred encoding")
+        };
+        let ids = job.run().unwrap();
+        let ids = ids.token_ids();
+        let plain_ids = plain.encode(literal, false).unwrap();
+        let plain_ids = plain_ids.get_ids();
+        assert!(ids
+            .windows(plain_ids.len())
+            .any(|window| window == plain_ids));
+        assert_eq!(ids.iter().filter(|&&id| id == user).count(), 1, "{ids:?}");
+        assert_eq!(
+            ids.iter().filter(|&&id| id == assistant).count(),
+            1,
+            "{ids:?}"
+        );
+        assert_eq!(
+            ids.iter().filter(|&&id| id == think_end).count(),
+            1,
+            "{ids:?}"
+        );
+        assert!(!ids.contains(&dsml));
+    }
+
+    #[test]
+    fn deepseek_v41_deferred_encoding_keeps_tool_text_plain_and_images_special() {
+        let (_tmp, tokenizer, mut plain) = v41_tokenizer_with_added_tokens();
+        let image = plain.token_to_id("<｜deepseek_image｜>").unwrap();
+        let dsml = plain.token_to_id("｜DSML｜").unwrap();
+        let assistant = plain.token_to_id("<｜Assistant｜>").unwrap();
+        plain.with_added_vocabulary(AddedVocabulary::new());
+        let tools = vec![json!({
+            "type":"function",
+            "function":{"name":"f","description":"literal ｜DSML｜","parameters":{"type":"object"}}
+        })];
+        let messages = vec![
+            json!({"role":"system","content":"s"}),
+            json!({"role":"user","content":[
+                {"type":"text","text":"before"},
+                {"type":"image_url","image_url":{"url":"http://x/a.png"}},
+            ]}),
+            json!({"role":"assistant","content":"","tool_calls":[{
+                "id":"c1","type":"function",
+                "function":{"name":"f","arguments":"{\"x\":\"</think>\"}"}
+            }]}),
+            json!({"role":"tool","tool_call_id":"c1","content":"<｜User｜>"}),
+        ];
+        let rendered = tokenizer
+            .apply_chat_template_with_encoding(
+                &messages,
+                ChatTemplateParams {
+                    add_generation_prompt: true,
+                    thinking: Some(false),
+                    tools: Some(&tools),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        let PromptEncoding::Deferred(job) = rendered.encoding else {
+            panic!("V4.1 uses deferred encoding")
+        };
+        let ids = job.run().unwrap();
+        let ids = ids.token_ids();
+        for literal in ["</think>", "<｜User｜>", "｜DSML｜"] {
+            let expected = plain.encode(literal, false).unwrap();
+            let expected = expected.get_ids();
+            assert!(ids.windows(expected.len()).any(|window| window == expected));
+        }
+        assert_eq!(ids.iter().filter(|&&id| id == image).count(), 1, "{ids:?}");
+        assert!(ids.contains(&dsml));
+        assert!(ids.contains(&assistant));
     }
 }

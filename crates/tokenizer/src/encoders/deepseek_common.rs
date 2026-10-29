@@ -13,6 +13,8 @@
 use serde_json::{json, Value};
 use thiserror::Error;
 
+use super::Prompt;
+
 const DSML_TOKEN: &str = "｜DSML｜";
 const THINKING_START_TOKEN: &str = "<think>";
 const THINKING_END_TOKEN: &str = "</think>";
@@ -313,6 +315,33 @@ pub(super) fn drop_thinking_messages(
 /// otherwise `string="false"` with its JSON. Never errors (unlike V3.2, which
 /// propagates a parse error).
 pub(super) fn encode_arguments_to_dsml(arguments: &Value, tags: &DsmlTags) -> String {
+    let mut prompt = Prompt::default();
+    write_arguments_to_dsml(&mut prompt, arguments, tags);
+    prompt.into_parts().0
+}
+
+/// Append template text whose DSML and thinking sigils are renderer-generated special tokens.
+/// Any text between them, including function names and argument values, stays plain.
+pub(super) fn push_dsml(prompt: &mut Prompt, text: &str) {
+    let mut specials: Vec<(usize, &str)> = [DSML_TOKEN, THINKING_START_TOKEN, THINKING_END_TOKEN]
+        .into_iter()
+        .flat_map(|token| {
+            text.match_indices(token)
+                .map(move |(start, _)| (start, token))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    specials.sort_by_key(|(start, _)| *start);
+    let mut cursor = 0;
+    for (start, sigil) in specials {
+        prompt.push_plain(&text[cursor..start]);
+        prompt.push_special(sigil);
+        cursor = start + sigil.len();
+    }
+    prompt.push_plain(&text[cursor..]);
+}
+
+pub(super) fn write_arguments_to_dsml(prompt: &mut Prompt, arguments: &Value, tags: &DsmlTags) {
     let mut parsed = arguments.clone();
     // Tolerate JSON strings, including double-encoded ones.
     for _ in 0..2 {
@@ -332,18 +361,23 @@ pub(super) fn encode_arguments_to_dsml(arguments: &Value, tags: &DsmlTags) -> St
             .collect(),
         None => vec![("arguments", arguments)],
     };
-    let mut parts = Vec::with_capacity(parameters.len());
-    for (key, value) in parameters {
+    for (index, (key, value)) in parameters.into_iter().enumerate() {
+        if index > 0 {
+            prompt.push_plain("\n");
+        }
         let (is_str, value_str) = match value {
             Value::String(text) => ("true", text.clone()),
             other => ("false", to_json(other)),
         };
-        parts.push(format!(
-            "<{DSML_TOKEN}{p} name=\"{key}\" string=\"{is_str}\">{value_str}</{DSML_TOKEN}{p}>",
-            p = tags.parameter,
+        prompt.push_plain("<");
+        prompt.push_special(DSML_TOKEN);
+        prompt.push_plain(format!(
+            "{} name=\"{key}\" string=\"{is_str}\">{value_str}</",
+            tags.parameter
         ));
+        prompt.push_special(DSML_TOKEN);
+        prompt.push_plain(format!("{}>", tags.parameter));
     }
-    parts.join("\n")
 }
 
 /// Python's `to_json`: `json.dumps(value, ensure_ascii=False)`, spaced
@@ -393,12 +427,23 @@ pub(super) fn has_tools(msg: &Value) -> bool {
 /// the tool-calls block name (`tool_calls` for V4, ` calls` for V4.1) and
 /// `tags` the invoke and parameter tags, around the `tool_schemas` lines.
 pub(super) fn render_v4_tools_template(block: &str, tags: &DsmlTags, tool_schemas: &str) -> String {
+    let mut prompt = Prompt::default();
+    write_v4_tools_template(&mut prompt, block, tags, tool_schemas);
+    prompt.into_parts().0
+}
+
+pub(super) fn write_v4_tools_template(
+    prompt: &mut Prompt,
+    block: &str,
+    tags: &DsmlTags,
+    tool_schemas: &str,
+) {
     let dsml = DSML_TOKEN;
     let invoke = tags.invoke;
     let parameter = tags.parameter;
     let tstart = THINKING_START_TOKEN;
     let tend = THINKING_END_TOKEN;
-    format!(
+    let instructions = format!(
 "## Tools
 
 You have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<{dsml}{block}>\" block like the following:
@@ -421,11 +466,11 @@ Otherwise, output directly after {tend} with tool calls or final response.
 
 ### Available Tool Schemas
 
-{tool_schemas}
-
-You MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.
 "
-    )
+    );
+    push_dsml(prompt, &instructions);
+    prompt.push_plain(tool_schemas);
+    prompt.push_plain("\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n");
 }
 
 #[cfg(test)]

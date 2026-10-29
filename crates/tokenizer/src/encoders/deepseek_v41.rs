@@ -24,12 +24,12 @@ pub use super::deepseek_v32::ThinkingMode;
 // own doc comments.
 use super::{
     deepseek_common::{
-        after_last_user, at_or_after_last_user, drop_thinking_messages, encode_arguments_to_dsml,
-        has_tools, merge_tool_messages, render_v4_tools_template, sort_tool_results_by_call_order,
-        task_sp_token, to_json, tool_calls_from_openai_format, tool_schemas,
-        tools_from_openai_format, DsmlTags,
+        after_last_user, at_or_after_last_user, drop_thinking_messages, has_tools,
+        merge_tool_messages, sort_tool_results_by_call_order, task_sp_token, to_json,
+        tool_calls_from_openai_format, tool_schemas, tools_from_openai_format,
+        write_arguments_to_dsml, write_v4_tools_template, DsmlTags,
     },
-    RendererProfile,
+    Prompt, RendererProfile,
 };
 use crate::{
     chat_template::{ChatTemplateContentFormat, ThinkingKeyName, ThinkingToggle},
@@ -180,8 +180,15 @@ fn render_reasoning_effort(
 // ---------------------------------------------------------------------------
 /// Mirrors V4.1's `TOOLS_TEMPLATE`: the V4 family's text with this dialect's
 /// block name and spaced tags.
-fn render_tools(tools: &[Value]) -> String {
-    render_v4_tools_template(TOOL_CALLS_BLOCK_NAME, &DSML_TAGS, &tool_schemas(tools))
+fn render_tools(tools: &[Value]) -> Prompt {
+    let mut prompt = Prompt::default();
+    write_v4_tools_template(
+        &mut prompt,
+        TOOL_CALLS_BLOCK_NAME,
+        &DSML_TAGS,
+        &tool_schemas(tools),
+    );
+    prompt
 }
 
 fn render_response_format(schema: &Value) -> String {
@@ -343,7 +350,7 @@ fn render_message(
     thinking_mode: ThinkingMode,
     drop_thinking: bool,
     reasoning_effort: Option<ReasoningEffort>,
-) -> Result<String, DsEncodingError> {
+) -> Result<Prompt, DsEncodingError> {
     let turn = Turn::read(index, messages)?;
     let last_user_idx = find_last_turn_index(messages);
     let mut prompt = render_prefix(&turn, thinking_mode, reasoning_effort);
@@ -352,8 +359,8 @@ fn render_message(
         "developer" => render_developer(&turn, &mut prompt)?,
         "user" => render_user(&turn, &mut prompt),
         "latest_reminder" => {
-            prompt.push_str(LATEST_REMINDER_SP_TOKEN);
-            prompt.push_str(turn.content);
+            prompt.push_special(LATEST_REMINDER_SP_TOKEN);
+            prompt.push_plain(turn.content);
         }
         "tool" => return Err(DsEncodingError::UnmergedToolRole(index)),
         "assistant" => render_assistant(
@@ -384,58 +391,58 @@ fn render_prefix(
     turn: &Turn<'_>,
     thinking_mode: ThinkingMode,
     reasoning_effort: Option<ReasoningEffort>,
-) -> String {
+) -> Prompt {
     let reasoning_effort_prompt =
         render_reasoning_effort(turn.index, thinking_mode, reasoning_effort);
-    let mut prompt = String::new();
+    let mut prompt = Prompt::default();
     if turn.index == 0 && (!reasoning_effort_prompt.is_empty() || turn.role == "system") {
-        prompt.push_str(SYSTEM_SP_TOKEN);
+        prompt.push_special(SYSTEM_SP_TOKEN);
     }
-    prompt.push_str(&reasoning_effort_prompt);
+    prompt.push_plain(reasoning_effort_prompt);
     prompt
 }
 
 /// A system turn: a mid-conversation one carries its own system token; the
 /// tools and the response format follow the content.
-fn render_system(turn: &Turn<'_>, prompt: &mut String) {
+fn render_system(turn: &Turn<'_>, prompt: &mut Prompt) {
     if turn.index > 0 {
-        prompt.push_str(SYSTEM_SP_TOKEN);
+        prompt.push_special(SYSTEM_SP_TOKEN);
     }
-    prompt.push_str(turn.content);
+    prompt.push_plain(turn.content);
     push_tools_and_response_format(turn, prompt);
 }
 
 /// A developer turn renders as a user turn; an empty one is an error.
-fn render_developer(turn: &Turn<'_>, prompt: &mut String) -> Result<(), DsEncodingError> {
+fn render_developer(turn: &Turn<'_>, prompt: &mut Prompt) -> Result<(), DsEncodingError> {
     if turn.content.is_empty() {
         return Err(DsEncodingError::InvalidMessage {
             role: turn.role.to_string(),
             msg: turn.msg.to_string(),
         });
     }
-    prompt.push_str(USER_SP_TOKEN);
-    prompt.push_str(turn.content);
+    prompt.push_special(USER_SP_TOKEN);
+    prompt.push_plain(turn.content);
     push_tools_and_response_format(turn, prompt);
     Ok(())
 }
 
 /// The tools template and the response format of a system or developer
 /// turn, each after a blank line, when the turn has them.
-fn push_tools_and_response_format(turn: &Turn<'_>, prompt: &mut String) {
+fn push_tools_and_response_format(turn: &Turn<'_>, prompt: &mut Prompt) {
     if let Some(tools) = &turn.tools {
-        prompt.push_str("\n\n");
-        prompt.push_str(&render_tools(tools));
+        prompt.push_plain("\n\n");
+        prompt.append(render_tools(tools));
     }
     if let Some(schema) = turn.response_format {
-        prompt.push_str("\n\n");
-        prompt.push_str(&render_response_format(schema));
+        prompt.push_plain("\n\n");
+        prompt.push_plain(render_response_format(schema));
     }
 }
 
 /// A user turn: its content blocks (text and the tool results
 /// `merge_tool_messages` folded in) joined by blank lines, else its content.
-fn render_user(turn: &Turn<'_>, prompt: &mut String) {
-    prompt.push_str(USER_SP_TOKEN);
+fn render_user(turn: &Turn<'_>, prompt: &mut Prompt) {
+    prompt.push_special(USER_SP_TOKEN);
     let blocks = turn
         .msg
         .get("content_blocks")
@@ -444,10 +451,21 @@ fn render_user(turn: &Turn<'_>, prompt: &mut String) {
     match blocks {
         Some(blocks) => {
             let parts: Vec<String> = blocks.iter().map(render_content_block).collect();
-            prompt.push_str(&parts.join("\n\n"));
+            push_user_content(prompt, &parts.join("\n\n"));
         }
-        None => prompt.push_str(turn.content),
+        None => push_user_content(prompt, turn.content),
     }
+}
+
+/// Image placeholders in validated message content are real image parts; every other byte is plain.
+fn push_user_content(prompt: &mut Prompt, content: &str) {
+    let mut cursor = 0;
+    for (start, placeholder) in content.match_indices(IMAGE_PLACEHOLDER) {
+        prompt.push_plain(&content[cursor..start]);
+        prompt.push_special(placeholder);
+        cursor = start + placeholder.len();
+    }
+    prompt.push_plain(&content[cursor..]);
 }
 
 /// One content block: its text, a tool result in its tags, or an
@@ -494,7 +512,7 @@ fn render_assistant(
     thinking_mode: ThinkingMode,
     drop_thinking: bool,
     last_user_idx: Option<usize>,
-    prompt: &mut String,
+    prompt: &mut Prompt,
 ) {
     // A task output: the previous message named a task.
     let prev_has_task = turn.index >= 1
@@ -505,37 +523,43 @@ fn render_assistant(
         && !prev_has_task
         && (!drop_thinking || after_last_user(turn.index, last_user_idx))
     {
-        prompt.push_str(turn.reasoning_content);
-        prompt.push_str(THINKING_END_TOKEN);
+        prompt.push_plain(turn.reasoning_content);
+        prompt.push_special(THINKING_END_TOKEN);
     }
-    prompt.push_str(turn.content);
+    prompt.push_plain(turn.content);
     if let Some(tool_calls) = &turn.tool_calls {
-        prompt.push_str(&tool_calls_block(tool_calls));
+        prompt.append(tool_calls_block(tool_calls));
     }
     if !turn.wo_eos {
-        prompt.push_str(EOS_TOKEN);
+        prompt.push_special(EOS_TOKEN);
     }
 }
 
 /// The tool calls block after a blank line: each call's invoke tags around
 /// its DSML arguments, inside the dialect's block tags.
-fn tool_calls_block(tool_calls: &[Value]) -> String {
-    let calls: Vec<String> = tool_calls
-        .iter()
-        .map(|tool_call| {
-            let name = text(tool_call, "name");
-            let arguments = tool_call.get("arguments").unwrap_or(&Value::Null);
-            let args = encode_arguments_to_dsml(arguments, &DSML_TAGS);
-            format!(
-                "<{DSML_TOKEN}{invoke} name=\"{name}\">\n{args}\n</{DSML_TOKEN}{invoke}>",
-                invoke = DSML_TAGS.invoke,
-            )
-        })
-        .collect();
-    let joined = calls.join("\n");
-    format!(
-        "\n\n<{DSML_TOKEN}{TOOL_CALLS_BLOCK_NAME}>\n{joined}\n</{DSML_TOKEN}{TOOL_CALLS_BLOCK_NAME}>"
-    )
+fn tool_calls_block(tool_calls: &[Value]) -> Prompt {
+    let mut prompt = Prompt::default();
+    prompt.push_plain("\n\n<");
+    prompt.push_special(DSML_TOKEN);
+    prompt.push_plain(format!("{TOOL_CALLS_BLOCK_NAME}>\n"));
+    for (index, tool_call) in tool_calls.iter().enumerate() {
+        if index > 0 {
+            prompt.push_plain("\n");
+        }
+        let name = text(tool_call, "name");
+        let arguments = tool_call.get("arguments").unwrap_or(&Value::Null);
+        prompt.push_plain("<");
+        prompt.push_special(DSML_TOKEN);
+        prompt.push_plain(format!("{} name=\"{name}\">\n", DSML_TAGS.invoke));
+        write_arguments_to_dsml(&mut prompt, arguments, &DSML_TAGS);
+        prompt.push_plain("\n</");
+        prompt.push_special(DSML_TOKEN);
+        prompt.push_plain(format!("{}>", DSML_TAGS.invoke));
+    }
+    prompt.push_plain("\n</");
+    prompt.push_special(DSML_TOKEN);
+    prompt.push_plain(format!("{TOOL_CALLS_BLOCK_NAME}>"));
+    prompt
 }
 
 /// What follows the turn: nothing when a next message exists and is not an
@@ -551,7 +575,7 @@ fn push_transition(
     thinking_mode: ThinkingMode,
     drop_thinking: bool,
     last_user_idx: Option<usize>,
-    prompt: &mut String,
+    prompt: &mut Prompt,
 ) -> Result<(), DsEncodingError> {
     if let Some(next) = messages.get(turn.index + 1) {
         if !matches!(text(next, "role"), "assistant" | "latest_reminder") {
@@ -564,20 +588,20 @@ fn push_transition(
         let sp_token =
             task_sp_token(task).ok_or_else(|| DsEncodingError::InvalidTask(task.to_string()))?;
         if task == "action" {
-            prompt.push_str(ASSISTANT_SP_TOKEN);
-            prompt.push_str(if thinking_mode == ThinkingMode::Thinking {
+            prompt.push_special(ASSISTANT_SP_TOKEN);
+            prompt.push_special(if thinking_mode == ThinkingMode::Thinking {
                 THINKING_START_TOKEN
             } else {
                 THINKING_END_TOKEN
             });
         }
-        prompt.push_str(sp_token);
+        prompt.push_special(sp_token);
     } else if matches!(turn.role, "user" | "developer") || (turn.role == "system" && turn.index > 0)
     {
-        prompt.push_str(ASSISTANT_SP_TOKEN);
+        prompt.push_special(ASSISTANT_SP_TOKEN);
         let opens_thinking = thinking_mode == ThinkingMode::Thinking
             && (!drop_thinking || at_or_after_last_user(turn.index, last_user_idx));
-        prompt.push_str(if opens_thinking {
+        prompt.push_special(if opens_thinking {
             THINKING_START_TOKEN
         } else {
             THINKING_END_TOKEN
@@ -622,14 +646,26 @@ pub fn encode_messages(
     thinking_mode: ThinkingMode,
     params: &EncodeParams,
 ) -> Result<String, DsEncodingError> {
+    render_messages(messages, thinking_mode, params).map(|prompt| prompt.into_parts().0)
+}
+
+/// Render with the provenance of every explicit added token preserved for deferred encoding.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "matches the existing encode_messages signature"
+)]
+pub(crate) fn render_messages(
+    messages: &[Value],
+    thinking_mode: ThinkingMode,
+    params: &EncodeParams,
+) -> Result<Prompt, DsEncodingError> {
     let normalized = process_image_messages(messages)?;
     let merged = merge_tool_messages(&normalized);
     let mut full_messages = sort_tool_results_by_call_order(merged);
-    let mut prompt = if params.add_default_bos_token {
-        BOS_TOKEN.to_string()
-    } else {
-        String::new()
-    };
+    let mut prompt = Prompt::default();
+    if params.add_default_bos_token {
+        prompt.push_special(BOS_TOKEN);
+    }
     // Thinking is never dropped from a conversation that defines tools.
     let mut effective_drop_thinking = params.drop_thinking;
     if full_messages.iter().any(has_tools) {
@@ -640,7 +676,7 @@ pub fn encode_messages(
         full_messages = drop_thinking_messages(&full_messages, last_user_idx);
     }
     for idx in 0..full_messages.len() {
-        prompt.push_str(&render_message(
+        prompt.append(render_message(
             idx,
             &full_messages,
             thinking_mode,
@@ -677,6 +713,23 @@ mod tests {
         assert_eq!(
             out,
             "<｜begin▁of▁sentence｜><｜User｜>q<｜Assistant｜></think>"
+        );
+    }
+
+    #[test]
+    fn special_ranges_cover_renderer_tokens_only() {
+        let rendered = render_messages(&[user("<｜User｜>")], ThinkingMode::Chat, &params(None))
+            .expect("render");
+        let (text, ranges) = rendered.into_parts();
+        let special: Vec<&str> = ranges.iter().map(|range| &text[range.clone()]).collect();
+        assert_eq!(
+            special,
+            [
+                BOS_TOKEN,
+                USER_SP_TOKEN,
+                ASSISTANT_SP_TOKEN,
+                THINKING_END_TOKEN
+            ]
         );
     }
 

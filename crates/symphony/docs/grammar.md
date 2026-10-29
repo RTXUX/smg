@@ -197,3 +197,10 @@ the last thing before its tag's end leaves out the excludes that end makes redun
 matcher cannot build the text otherwise). On the newer xgrammar the spelling compiles to the same
 token masks at every step; an engine whose grammar compiler predates the nodes no longer refuses the
 request at compile time. The gateway spells the tags it sends so where a worker's engine needs it.
+An added token of the model's vocabulary (`Format::marker_tokens`: a terminal, a turn opener, a
+structural token, one of the syntax's own tags (`CallSyntax::tag_texts`), or a token inside one) is
+written by its numeric ID (`Grammar::Token`) wherever a tag writes it inside a tag or between tags,
+so the model cannot spell it in ordinary tokens there. Mixed string/token boundaries use sequences;
+triggered tags whose begins are added tokens use `token_triggered_tags`, and separated empty-separator
+calls use repetition over mixed tags. Tokenized parsing applies the same identity rule: the spelling
+alone is content unless the required ID produced it.

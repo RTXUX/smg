@@ -517,9 +517,13 @@ impl Format {
         });
 
         let tokens = self.marker_token_texts();
-        let holds_token = |text: &str| tokens.iter().any(|token| text.contains(token.as_str()));
+        let holds_token = |text: &str| {
+            tokens
+                .iter()
+                .any(|token| text.contains(token.text.as_str()))
+        };
         let mut delimiters = vec![spelling.value_close.to_string()];
-        delimiters.extend(tokens.iter().cloned());
+        delimiters.extend(tokens.iter().map(|token| token.text.clone()));
         for (text, _) in exits(arguments) {
             if !holds_token(text) && !delimiters.iter().any(|known| known == text) {
                 delimiters.push(text.to_string());

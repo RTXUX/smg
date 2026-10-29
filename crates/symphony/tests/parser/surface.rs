@@ -6,10 +6,10 @@ use symphony::{
     declared::Declared,
     engine::Engine,
     event::{DropReason, Event, Events, FinishReason, MalformedReason, Text},
-    format::{CallId, CallSyntax, Emits, Format, Whitespace},
+    format::{CallId, CallSyntax, Emits, Format, MarkerToken, Whitespace},
     grammar::{
         Bound, Grammar, GrammarStart, Output, OutputAnswer, OutputChoice, OutputPosition,
-        OutputSpelling, Tag, Turn,
+        OutputSpelling, Tag, TokenTag, Turn,
     },
     input::{EngineFinish, Input, TokenSpan},
     parser::{ParseError, Parser},
@@ -41,7 +41,14 @@ const RE_EXPORTS: [(&str, &[&str]); 9] = [
     ),
     (
         "format",
-        &["CallId", "CallSyntax", "Emits", "Format", "Whitespace"],
+        &[
+            "CallId",
+            "CallSyntax",
+            "Emits",
+            "Format",
+            "MarkerToken",
+            "Whitespace",
+        ],
     ),
     (
         "grammar",
@@ -55,6 +62,7 @@ const RE_EXPORTS: [(&str, &[&str]); 9] = [
             "OutputPosition",
             "OutputSpelling",
             "Tag",
+            "TokenTag",
             "Turn",
         ],
     ),
@@ -125,7 +133,7 @@ fn every_pinned_name_resolves_under_its_module() {
         MalformedReason,
         Text,
     )>();
-    named::<(CallId, CallSyntax, Emits, Format, Whitespace)>();
+    named::<(CallId, CallSyntax, Emits, Format, MarkerToken, Whitespace)>();
     named::<(
         Bound,
         Grammar,
@@ -134,7 +142,7 @@ fn every_pinned_name_resolves_under_its_module() {
         OutputAnswer,
         OutputChoice,
     )>();
-    named::<(OutputPosition, OutputSpelling, Tag, Turn)>();
+    named::<(OutputPosition, OutputSpelling, Tag, TokenTag, Turn)>();
     named::<(EngineFinish, Input, TokenSpan, ParseError)>();
     named::<Inferred>();
     reads::<Inferred>();
@@ -162,6 +170,7 @@ mod at_the_root {
             symphony::CallSyntax,
             symphony::Emits,
             symphony::Format,
+            symphony::MarkerToken,
             symphony::Whitespace,
         )>();
         named::<(
@@ -174,6 +183,7 @@ mod at_the_root {
             symphony::OutputPosition,
             symphony::OutputSpelling,
             symphony::Tag,
+            symphony::TokenTag,
             symphony::Turn,
         )>();
         named::<(symphony::EngineFinish, symphony::Input, symphony::TokenSpan)>();

@@ -19,7 +19,51 @@
 //! pieces ([`Scanned`]) and takes them back once they are read ([`Scanner::reclaim`]), so a stream
 //! that holds a byte at every delta allocates nothing for it after its first.
 
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, ops::Range, sync::Arc};
+
+use crate::{format::MarkerToken, input::TokenSpan};
+
+/// A visible added token's byte range and numeric ID.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TokenTextRange {
+    pub range: Range<usize>,
+    pub id: u32,
+}
+
+#[derive(Clone, Debug)]
+struct SpecialSegment {
+    range: Range<usize>,
+    id: u32,
+}
+
+#[derive(Clone, Debug)]
+struct Marker {
+    special: Vec<SpecialSegment>,
+}
+
+impl Marker {
+    fn new(text: String, tokens: &[MarkerToken]) -> Self {
+        let mut special = Vec::new();
+        for token in tokens {
+            for (start, spelling) in text.match_indices(&token.text) {
+                special.push(SpecialSegment {
+                    range: start..start + spelling.len(),
+                    id: token.id,
+                });
+            }
+        }
+        Self { special }
+    }
+
+    fn matches_provenance(&self, at: usize, specials: &[TokenTextRange]) -> bool {
+        self.special.iter().all(|segment| {
+            let range = at + segment.range.start..at + segment.range.end;
+            specials
+                .iter()
+                .any(|special| special.range == range && special.id == segment.id)
+        })
+    }
+}
 
 /// What a piece of the model's text turned out to be.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +93,9 @@ pub struct Scanner {
     markers: Arc<[String]>,
     /// The bytes held back because they may still become a marker: fewer than the longest marker.
     held: String,
+    provenance: Vec<Marker>,
+    held_special: Vec<TokenTextRange>,
+    tokenized: bool,
     /// The bytes the markers start with: a marker can begin at no other byte, so the scan looks
     /// for one only there, a word of the text at a time ([`Self::next_start`]). A multi-byte
     /// character's first byte is among them when a marker starts with it; its other bytes never
@@ -189,11 +236,49 @@ impl Scanner {
         Self {
             markers,
             held: String::new(),
+            provenance: Vec::new(),
+            held_special: Vec::new(),
+            tokenized: false,
             starts,
             longest,
             joined: String::new(),
             spans: Vec::new(),
         }
+    }
+
+    pub(crate) fn bind_tokens(mut self, tokens: &[MarkerToken]) -> Self {
+        if !tokens.is_empty() {
+            self.provenance = self
+                .markers
+                .iter()
+                .map(|text| Marker::new(text.clone(), tokens))
+                .collect();
+        }
+        self
+    }
+
+    pub fn with_tokens(
+        markers: impl IntoIterator<Item = impl Into<String>>,
+        tokens: &[MarkerToken],
+    ) -> Self {
+        Self::new(markers).bind_tokens(tokens)
+    }
+
+    pub fn feed_tokenized<'a>(
+        &mut self,
+        bytes: &'a str,
+        spans: &[TokenSpan],
+        tokens: &[MarkerToken],
+    ) -> Scanned<'a> {
+        let specials: Vec<_> = spans
+            .iter()
+            .filter(|span| tokens.iter().any(|token| token.id == span.token_id))
+            .map(|span| TokenTextRange {
+                range: span.start..span.end,
+                id: span.token_id,
+            })
+            .collect();
+        self.feed_with_ranges(bytes, &specials, true)
     }
 
     /// The marker a [`Piece::Marker`] refers to.
@@ -241,10 +326,26 @@ impl Scanner {
     /// when no marker may begin in them either, the join is one piece of text without a scan: the
     /// common case of a delta that ended in such a byte.
     pub fn feed<'a>(&mut self, bytes: &'a str) -> Scanned<'a> {
+        self.feed_with_ranges(bytes, &[], false)
+    }
+
+    fn feed_with_ranges<'a>(
+        &mut self,
+        bytes: &'a str,
+        specials: &[TokenTextRange],
+        tokenized: bool,
+    ) -> Scanned<'a> {
+        let held_len = self.held.len();
+        let mut all_special = std::mem::take(&mut self.held_special);
+        all_special.extend(specials.iter().map(|special| TokenTextRange {
+            range: special.range.start + held_len..special.range.end + held_len,
+            id: special.id,
+        }));
+        self.tokenized = tokenized;
         let mut joined = std::mem::take(&mut self.joined);
         let mut spans = std::mem::take(&mut self.spans);
         if self.held.is_empty() {
-            self.scan(bytes, true, &mut spans);
+            self.scan(bytes, true, &mut spans, &all_special);
         } else {
             let one_byte = self.held.len() == 1;
             joined.push_str(&self.held);
@@ -259,7 +360,7 @@ impl Scanner {
                     end: joined.len(),
                 });
             } else {
-                self.scan(&joined, true, &mut spans);
+                self.scan(&joined, true, &mut spans, &all_special);
             }
         }
         Scanned {
@@ -276,7 +377,8 @@ impl Scanner {
         let mut spans = std::mem::take(&mut self.spans);
         joined.push_str(&self.held);
         self.held.clear();
-        self.scan(&joined, false, &mut spans);
+        let specials = std::mem::take(&mut self.held_special);
+        self.scan(&joined, false, &mut spans, &specials);
         Scanned {
             bytes: "",
             joined,
@@ -297,7 +399,13 @@ impl Scanner {
     /// Split `text` into pieces, as spans of it. With `more_may_come`, a tail that could still
     /// grow into a marker is held instead of released. Only a position where a marker may begin is
     /// looked at: nowhere else can a marker be, or a tail be the beginning of one.
-    fn scan(&mut self, text: &str, more_may_come: bool, spans: &mut Vec<Span>) {
+    fn scan(
+        &mut self,
+        text: &str,
+        more_may_come: bool,
+        spans: &mut Vec<Span>,
+        specials: &[TokenTextRange],
+    ) {
         let bytes = text.as_bytes();
         let mut released = 0;
         let mut at = 0;
@@ -313,9 +421,17 @@ impl Scanner {
             if more_may_come && rest.len() < self.longest && self.could_grow_into_marker(rest) {
                 Self::release(spans, released, at);
                 self.held.push_str(rest);
+                self.held_special = specials
+                    .iter()
+                    .filter(|s| s.range.start >= at)
+                    .map(|s| TokenTextRange {
+                        range: s.range.start - at..s.range.end - at,
+                        id: s.id,
+                    })
+                    .collect();
                 return;
             }
-            if let Some(index) = self.longest_marker_at(rest) {
+            if let Some(index) = self.longest_marker_at(rest, at, specials) {
                 Self::release(spans, released, at);
                 spans.push(Span::Marker(index));
                 at += self.markers[index].len();
@@ -376,7 +492,12 @@ impl Scanner {
     }
 
     /// The longest marker that `rest` starts with, by index; of equal ones, the first in the list.
-    fn longest_marker_at(&self, rest: &str) -> Option<usize> {
+    fn longest_marker_at(
+        &self,
+        rest: &str,
+        at: usize,
+        specials: &[TokenTextRange],
+    ) -> Option<usize> {
         let mut found: Option<(usize, usize)> = None;
         for (index, marker) in self.markers.iter().enumerate() {
             let longer = found.is_none_or(|(_, length)| marker.len() > length);
@@ -384,6 +505,9 @@ impl Scanner {
                 && longer
                 && heads_alike(marker, rest)
                 && rest.starts_with(marker.as_str())
+                && (!self.tokenized
+                    || self.provenance.is_empty()
+                    || self.provenance[index].matches_provenance(at, specials))
             {
                 found = Some((index, marker.len()));
             }
@@ -483,6 +607,28 @@ fn lanes_with(word: u64, byte: u8) -> u64 {
 /// The position of the lowest lane marked in `hits`.
 fn lane_of(hits: u64) -> usize {
     (hits.trailing_zeros() / 8) as usize
+}
+
+/// Associate prompt token IDs with their visible added-token spellings. Each spelling's IDs and
+/// matches occur in the same order, so no full token-to-byte decode is needed.
+pub(crate) fn prompt_token_ranges(
+    text: &str,
+    token_ids: &[u32],
+    tokens: &[MarkerToken],
+) -> Option<Vec<TokenTextRange>> {
+    let mut ranges = Vec::new();
+    for token in tokens {
+        let mut occurrences = text.match_indices(&token.text);
+        for &id in token_ids.iter().filter(|&&id| id == token.id) {
+            let (start, spelling) = occurrences.next()?;
+            ranges.push(TokenTextRange {
+                range: start..start + spelling.len(),
+                id,
+            });
+        }
+    }
+    ranges.sort_by_key(|special| special.range.start);
+    Some(ranges)
 }
 
 #[cfg(test)]

@@ -1269,17 +1269,26 @@ impl Engine {
     /// its last turn anchor, the turn's first piece deciding its start where the table has a start
     /// row. An arguments state is not entered from the prompt: the engine rests where the turn
     /// started.
-    fn seed(&mut self, prompt: &str, out: &mut Events) {
+    fn seed(
+        &mut self,
+        prompt: &str,
+        token_ids: &[u32],
+        out: &mut Events,
+    ) -> Result<(), ParseError> {
         let Replay {
             state,
             at_turn_start,
             begun,
-        } = self.format.replayed(prompt);
+        } = self
+            .format
+            .replayed_with_ids(prompt, token_ids)
+            .map_err(ParseError::Internal)?;
         self.at_turn_start = at_turn_start;
         if state != self.state {
             self.enter(state, out);
         }
         self.stay.begun = begun;
+        Ok(())
     }
 
     /// Whether `text`, a piece at the end of the output, is a tag the end cut short: one that
@@ -1363,17 +1372,21 @@ fn owned(scanned: &Scanned<'_>) -> Vec<Piece<'static>> {
 impl Parser for Engine {
     fn feed<'d>(&mut self, input: Input<'d>, out: &mut Events<'d>) -> Result<(), ParseError> {
         match input {
-            Input::Prompt { text, .. } => {
+            Input::Prompt { token_ids, text } => {
                 if self.stage != Stage::Fresh {
                     return Err(ParseError::Lifecycle(
                         "prompt after output began".to_string(),
                     ));
                 }
                 self.stage = Stage::Streaming;
-                self.seed(text, out);
-                Ok(())
+                self.seed(text, token_ids, out)
             }
-            Input::Delta { text, spans, .. } => {
+            Input::Delta {
+                token_ids,
+                text,
+                spans,
+                ..
+            } => {
                 if self.stage == Stage::Ended {
                     return Err(ParseError::Lifecycle("delta after end".to_string()));
                 }
@@ -1387,7 +1400,14 @@ impl Parser for Engine {
                     }
                     return Ok(());
                 }
-                let scanned = self.scanner.feed(text);
+                let scanned = if token_ids.is_empty()
+                    && (spans.is_empty() || spans.iter().any(|span| !span.continued))
+                {
+                    self.scanner.feed(text)
+                } else {
+                    self.scanner
+                        .feed_tokenized(text, spans, self.format.marker_token_texts())
+                };
                 // One piece of text (after a held byte, or before one held now) is taken as
                 // [`Self::place`] would take it, without the piece, like a delta read as text.
                 match scanned.whole_text() {

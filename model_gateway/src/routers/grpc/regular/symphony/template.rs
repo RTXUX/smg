@@ -35,7 +35,7 @@ use smg_response_template::{
         layout::{self, Case},
     },
 };
-use symphony::Format;
+use symphony::{Format, MarkerToken};
 use tracing::info;
 
 /// The tables the registered tokenizers' response templates compile into, by model; and, by
@@ -137,6 +137,14 @@ impl Templates {
         );
         table
     }
+
+    /// The model tokenizer's added tokens with their numeric IDs.
+    pub(crate) fn marker_tokens(&self, model: &str) -> Vec<MarkerToken> {
+        self.tokenizers
+            .get(model)
+            .map(|tokenizer| marker_tokens(tokenizer.as_ref()))
+            .unwrap_or_default()
+    }
 }
 
 /// The table `tokenizer`'s response template compiles into, with the layout its chat template
@@ -168,7 +176,7 @@ fn compile(model: &str, tokenizer: &dyn Tokenizer) -> Result<Format, String> {
             compiled.format
         }
     };
-    Ok(format.marker_tokens(token_texts(tokenizer)))
+    Ok(format.marker_tokens(marker_tokens(tokenizer)))
 }
 
 /// The probe's conversation `case` as the tokenizer's chat template renders it, with the probe's
@@ -223,10 +231,8 @@ fn stop_texts(tokenizer: &dyn Tokenizer) -> Vec<String> {
     texts
 }
 
-/// The texts of the vocabulary's added tokens: the ones the tokenizer lists for its prefix
-/// cache, taken on the raw text and after normalization, and the special tokens the config
-/// names. A template's markers are often added tokens that are not special.
-fn token_texts(tokenizer: &dyn Tokenizer) -> Vec<String> {
+/// The vocabulary's added tokens and their numeric IDs, including special tokens named by config.
+fn marker_tokens(tokenizer: &dyn Tokenizer) -> Vec<MarkerToken> {
     let special = tokenizer.get_special_tokens();
     let named = [
         &special.bos_token,
@@ -237,7 +243,7 @@ fn token_texts(tokenizer: &dyn Tokenizer) -> Vec<String> {
         &special.cls_token,
         &special.mask_token,
     ];
-    let mut texts: Vec<String> = Vec::new();
+    let mut tokens: Vec<MarkerToken> = Vec::new();
     for text in tokenizer
         .added_token_strings()
         .into_iter()
@@ -245,11 +251,14 @@ fn token_texts(tokenizer: &dyn Tokenizer) -> Vec<String> {
         .chain(named.into_iter().flatten().cloned())
         .chain(special.additional_special_tokens.iter().cloned())
     {
-        if !texts.contains(&text) {
-            texts.push(text);
+        if tokens.iter().any(|token| token.text == text) {
+            continue;
+        }
+        if let Some(id) = tokenizer.token_to_id(&text) {
+            tokens.push(MarkerToken::new(text, id));
         }
     }
-    texts
+    tokens
 }
 
 /// The recorded templates the compiler's own tests pair: transformers' `serve` response

@@ -48,6 +48,28 @@ fn older(grammar: Grammar, ends: &[String], tail: bool) -> Grammar {
                 .collect(),
         },
         Grammar::Tag(tag) => Grammar::Tag(in_tag(tag)),
+        Grammar::MixedTag {
+            begin,
+            content,
+            end,
+        } => sequence(vec![*begin, *content, *end], ends, tail),
+        Grammar::TokenTriggeredTags {
+            trigger_tokens,
+            tags,
+            at_least_one,
+            stop_after_first,
+        } => Grammar::TokenTriggeredTags {
+            trigger_tokens,
+            tags: tags
+                .into_iter()
+                .map(|tag| super::TokenTag {
+                    content: Box::new(older(*tag.content, std::slice::from_ref(&tag.end), true)),
+                    ..tag
+                })
+                .collect(),
+            at_least_one,
+            stop_after_first,
+        },
         Grammar::TriggeredTags {
             triggers,
             tags,
@@ -265,9 +287,12 @@ fn constant_text(elements: &[Grammar]) -> Option<String> {
 fn unlimited(grammar: &Grammar) -> bool {
     match grammar {
         Grammar::AnyText { excludes } => excludes.is_empty(),
-        Grammar::TriggeredTags { .. } | Grammar::TagsWithSeparator { .. } => true,
+        Grammar::TriggeredTags { .. }
+        | Grammar::TokenTriggeredTags { .. }
+        | Grammar::TagsWithSeparator { .. } => true,
         Grammar::Star(_) | Grammar::Plus(_) => true,
         Grammar::Optional(content) => unlimited(content),
+        Grammar::MixedTag { end, .. } => unlimited(end),
         Grammar::Sequence(elements) => elements.last().is_some_and(unlimited),
         Grammar::Or(elements) => elements.iter().any(unlimited),
         Grammar::ConstString(_)
@@ -657,7 +682,7 @@ mod tests {
             tags: vec![tag(
                 "<t>",
                 Grammar::Sequence(vec![
-                    Grammar::Token("<|x|>".to_string()),
+                    Grammar::Token(123),
                     Grammar::JsonSchema {
                         schema: json!({"type": "object"}),
                         style: None,

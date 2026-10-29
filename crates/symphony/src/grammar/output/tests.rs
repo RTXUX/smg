@@ -513,14 +513,19 @@ fn a_value_is_raw_text_a_constant_or_json() {
 #[test]
 fn a_raw_value_keeps_out_only_the_calls_own_words() {
     let spelling = table(true)
-        .marker_tokens([
-            "<arg name=\"",
-            "<|head|>",
-            "<|via|>",
-            "<|body|>",
-            "<|done|>",
-            "</arg>",
-        ])
+        .marker_tokens(
+            [
+                "<arg name=\"",
+                "<|head|>",
+                "<|via|>",
+                "<|body|>",
+                "<|done|>",
+                "</arg>",
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(id, text)| crate::MarkerToken::new(text, id as u32)),
+        )
         .output_spelling()
         .unwrap();
     let schema = json!({"type": "object", "properties": {

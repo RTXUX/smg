@@ -49,10 +49,10 @@ mod tokens;
 pub use declared::Declared;
 pub use engine::Engine;
 pub use event::{DropReason, Event, Events, FinishReason, MalformedReason, Text};
-pub use format::{CallId, CallSyntax, Emits, Format, Whitespace};
+pub use format::{CallId, CallSyntax, Emits, Format, MarkerToken, Whitespace};
 pub use grammar::{
     Bound, Grammar, GrammarStart, Output, OutputAnswer, OutputChoice, OutputPosition,
-    OutputSpelling, Tag, Turn,
+    OutputSpelling, Tag, TokenTag, Turn,
 };
 pub use ids::CallIds;
 pub use input::{EngineFinish, Input, TokenSpan};

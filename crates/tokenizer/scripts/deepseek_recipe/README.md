@@ -27,7 +27,10 @@ replays the 29 conversations representable by its Chat DTO; dynamic system
 tool declarations, deferred tools, and the internal latest-reminder role are
 renderer fixtures, not claims of new API support. Messages tests cover its
 block separators and thinking controls. SMG retains explicit numeric effort
-budgets (1–100) and `drop_thinking: false` as extensions.
+budgets (1–100) as an extension. V4 and V4.1 retain historical reasoning by
+default (`drop_thinking: false`); `chat_template_kwargs.drop_thinking: true`
+opts into pruning. Oracle comparisons explicitly request pruning to match
+this pinned recipe's default; separate tests cover SMG's retention policy.
 
 The older `render_fixtures.json`, `render_ids_fixtures.json`, and
 `generate_deepseek_v41_fixtures.py` retain the previous engine-format reference;

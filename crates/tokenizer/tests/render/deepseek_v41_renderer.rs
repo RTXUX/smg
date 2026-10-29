@@ -34,7 +34,8 @@ fn check_cases(tokenizer: &HuggingFaceTokenizer, check_ids: bool) {
     let fixture: Value =
         serde_json::from_str(include_str!("../fixtures/deepseek_v41/recipe.json")).unwrap();
     for case in fixture["cases"].as_array().unwrap() {
-        let mut kwargs = HashMap::new();
+        // Compare the pinned recipe with its original pruning policy.
+        let mut kwargs = HashMap::from([("drop_thinking".to_string(), json!(true))]);
         for (from, to) in [
             ("effort", "reasoning_effort"),
             ("response_format", "response_format"),

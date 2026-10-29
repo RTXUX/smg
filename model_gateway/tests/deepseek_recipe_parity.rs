@@ -47,7 +47,9 @@ fn chat_requests_render_like_the_recipe() {
         ) {
             continue;
         }
+        // The pinned recipe defaults to pruning; SMG defaults to retention.
         let mut body = json!({"model":"deepseek-v4.1-flash", "messages":case["messages"],
+            "chat_template_kwargs":{"drop_thinking":true},
             "thinking":{"type":if case["thinking"] == false {"disabled"} else {"enabled"}}});
         for (from, to) in [
             ("effort", "reasoning_effort"),
@@ -134,9 +136,29 @@ fn messages_preserve_recipe_paragraphs_and_thinking_controls() {
     assert!(prompt.text.contains("first\n\nsecond<｜User｜>q"));
     assert!(prompt
         .text
-        .contains("<｜Assistant｜></think>a\n\nb<｜end▁of▁sentence｜>"));
-    assert!(!prompt.text.contains("old"));
+        .contains("<｜Assistant｜><think>old</think>a\n\nb<｜end▁of▁sentence｜>"));
     assert!(prompt
         .text
         .ends_with("<｜User｜>next<｜Assistant｜><think>"));
+}
+
+#[test]
+fn chat_history_retention_can_be_explicitly_disabled() {
+    let (_directory, tokenizer) = tokenizer();
+    for drop in [None, Some(false), Some(true)] {
+        let mut body = json!({"model":"deepseek-v4.1-flash",
+            "messages":[{"role":"user","content":"q"},
+                {"role":"assistant","reasoning_content":"old thought","content":"answer"},
+                {"role":"user","content":"next"}]});
+        if let Some(value) = drop {
+            body["chat_template_kwargs"] = json!({"drop_thinking":value});
+        }
+        let mut request: ChatCompletionRequest = serde_json::from_value(body).unwrap();
+        request.normalize();
+        let (prompt, _) = process_chat_messages_with_encoding(&request, &tokenizer, None).unwrap();
+        assert_eq!(
+            prompt.text.contains("<think>old thought</think>"),
+            drop != Some(true)
+        );
+    }
 }

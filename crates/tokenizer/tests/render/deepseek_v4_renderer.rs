@@ -56,7 +56,8 @@ struct Fixtures {
 /// top-level `reasoning_effort` projected under the key the renderer reads,
 /// the request's own `chat_template_kwargs` on top of it.
 fn gateway_template_kwargs(case: &Case) -> HashMap<String, Value> {
-    let mut kwargs = HashMap::new();
+    // Retain the engine oracle's pruning policy explicitly.
+    let mut kwargs = HashMap::from([("drop_thinking".to_string(), Value::Bool(true))]);
     if let Some(effort) = &case.reasoning_effort {
         kwargs.insert(
             "reasoning_effort".to_string(),

@@ -2322,7 +2322,12 @@ fn apply_deepseek_v4(
     };
     let encode_params = deepseek_v4::EncodeParams {
         add_default_bos_token: true,
-        drop_thinking: resolve_drop_thinking(msgs),
+        // Keep replayed reasoning stable across turns unless explicitly pruned.
+        drop_thinking: params
+            .template_kwargs
+            .and_then(|kwargs| kwargs.get("drop_thinking"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
         reasoning_effort,
         effort_encoding,
     };
@@ -2430,7 +2435,7 @@ fn apply_deepseek_v41(
         deepseek_v32::ThinkingMode::Chat
     };
 
-    let drop_thinking = boolean_kwarg_v41(params, "drop_thinking")?.unwrap_or(true);
+    let drop_thinking = boolean_kwarg_v41(params, "drop_thinking")?.unwrap_or(false);
 
     // `add_generation_prompt: false` with a trailing assistant message reaches
     // the encoder as `wo_eos` on that message: no EOS, no generation header.

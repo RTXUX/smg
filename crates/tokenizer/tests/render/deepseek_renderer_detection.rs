@@ -915,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn v41_drop_thinking_false_keeps_historical_reasoning() {
+    fn v41_keeps_historical_reasoning_by_default() {
         let (_tmp, tokenizer) = v41_tokenizer();
         let messages = vec![
             json!({"role": "user", "content": "q1"}),
@@ -934,9 +934,9 @@ mod tests {
                 )
                 .unwrap()
         };
-        // Default (`drop_thinking: true`): reasoning before the last user
-        // turn is dropped.
-        assert!(!render(None).contains("r1"));
+        assert!(render(None).contains("<think>r1</think>"));
+        let drop = HashMap::from([("drop_thinking".to_string(), json!(true))]);
+        assert!(!render(Some(&drop)).contains("r1"));
         let kw = HashMap::from([("drop_thinking".to_string(), json!(false))]);
         let out = render(Some(&kw));
         assert_eq!(
@@ -945,6 +945,37 @@ mod tests {
                 "{V41_BOS}{V41_DEFAULT_EFFORT_HEADER}<\u{FF5C}User\u{FF5C}>q1<\u{FF5C}Assistant\u{FF5C}><think>r1</think>a1{V41_EOS}<\u{FF5C}User\u{FF5C}>q2<\u{FF5C}Assistant\u{FF5C}><think>"
             )
         );
+    }
+
+    #[test]
+    fn v4_history_retention_default_and_override_cover_both_revisions() {
+        for source in [BASE_ENCODER_SNIPPET, V0731_ENCODER_SNIPPET] {
+            let (_tmp, path) = write_v4_model_dir("deepseek-v4", Some(source));
+            let tokenizer = HuggingFaceTokenizer::from_file(&path).unwrap();
+            let messages = vec![
+                json!({"role":"user", "content":"q1"}),
+                json!({"role":"assistant", "reasoning_content":"old thought", "content":"a1"}),
+                json!({"role":"user", "content":"q2"}),
+            ];
+            for (drop, retained) in [(None, true), (Some(false), true), (Some(true), false)] {
+                let kwargs =
+                    drop.map(|value| HashMap::from([("drop_thinking".to_string(), json!(value))]));
+                let prompt = tokenizer
+                    .apply_chat_template(
+                        &messages,
+                        ChatTemplateParams {
+                            template_kwargs: kwargs.as_ref(),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(
+                    prompt.contains("<think>old thought</think>"),
+                    retained,
+                    "{prompt}"
+                );
+            }
+        }
     }
 
     #[test]

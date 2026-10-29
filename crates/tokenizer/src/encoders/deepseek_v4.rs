@@ -144,7 +144,7 @@ impl Default for EncodeParams {
     fn default() -> Self {
         Self {
             add_default_bos_token: true,
-            drop_thinking: true,
+            drop_thinking: false,
             reasoning_effort: None,
             effort_encoding: EffortEncoding::Original,
         }
@@ -822,7 +822,7 @@ mod tests {
             encode_messages(&in_place, ThinkingMode::Thinking, &EncodeParams::default()).unwrap();
         assert_eq!(
             out,
-            format!("{BOS_TOKEN}S{USER_SP_TOKEN}TaskEnvA{EOS_TOKEN}{USER_SP_TOKEN}Q2Note")
+            format!("{BOS_TOKEN}S{USER_SP_TOKEN}TaskEnv{THINKING_END_TOKEN}A{EOS_TOKEN}{USER_SP_TOKEN}Q2Note")
         );
         assert!(
             EffortEncoding::Original
@@ -854,7 +854,7 @@ mod tests {
         assert_eq!(
             out,
             format!(
-                "{BOS_TOKEN}S{USER_SP_TOKEN}Task\n\nEnv{ASSISTANT_SP_TOKEN}{THINKING_END_TOKEN}A{EOS_TOKEN}\
+                "{BOS_TOKEN}S{USER_SP_TOKEN}Task\n\nEnv{ASSISTANT_SP_TOKEN}{THINKING_START_TOKEN}{THINKING_END_TOKEN}A{EOS_TOKEN}\
                  {USER_SP_TOKEN}Q2\n\nNote{ASSISTANT_SP_TOKEN}{THINKING_START_TOKEN}"
             )
         );

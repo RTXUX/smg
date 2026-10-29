@@ -353,7 +353,7 @@ impl Default for EncodeParams {
     fn default() -> Self {
         Self {
             add_default_bos_token: true,
-            drop_thinking: true,
+            drop_thinking: false,
             reasoning_effort: None,
         }
     }
@@ -633,6 +633,8 @@ mod tests {
         );
         for case in fixture["cases"].as_array().unwrap() {
             let params = EncodeParams {
+                // The pinned recipe predates SMG's history-retention default.
+                drop_thinking: true,
                 reasoning_effort: parse_reasoning_effort(&case["effort"]).unwrap(),
                 ..Default::default()
             };

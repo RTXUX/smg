@@ -98,6 +98,9 @@ pub(crate) struct RendererProfile {
 impl RendererProfile {
     /// The behaviours no native renderer has unless its table says so.
     pub(crate) const NO_CAPABILITIES: RendererCapabilities = RendererCapabilities {
+        required_tool_prefix: None,
+        message_text_separator: None,
+        authored_media_order: false,
         enable_thinking_alias: false,
         native_assistant_continuation: false,
         raw_tool_call_arguments: false,

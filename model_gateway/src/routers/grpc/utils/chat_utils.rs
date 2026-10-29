@@ -772,6 +772,11 @@ pub(crate) fn process_chat_messages_with_placeholders(
     placeholder_tokens: Option<&PlaceholderTokens>,
     media_order: MediaPartOrder,
 ) -> Result<(ProcessedMessages, PromptEncoding), String> {
+    let media_order = if tokenizer.renderer_capabilities().authored_media_order {
+        MediaPartOrder::Authored
+    } else {
+        media_order
+    };
     let rendered = {
         // Get content format and transform messages accordingly
         let content_format = tokenizer.chat_template_content_format();
@@ -2254,12 +2259,18 @@ mod tests {
     }
 
     const NATIVE_CONTINUATION: RendererCapabilities = RendererCapabilities {
+        required_tool_prefix: None,
+        message_text_separator: None,
+        authored_media_order: false,
         enable_thinking_alias: false,
         native_assistant_continuation: true,
         raw_tool_call_arguments: false,
         declares_tools_under_tool_choice_none: false,
     };
     const RAW_ARGUMENTS: RendererCapabilities = RendererCapabilities {
+        required_tool_prefix: None,
+        message_text_separator: None,
+        authored_media_order: false,
         enable_thinking_alias: false,
         native_assistant_continuation: false,
         raw_tool_call_arguments: true,

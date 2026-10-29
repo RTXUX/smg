@@ -5,6 +5,7 @@ mod logprobs;
 pub(crate) mod message_utils;
 mod metrics;
 mod parsers;
+pub(crate) use parsers::continue_prefilled_tool_constraint;
 mod pd_bootstrap;
 pub(crate) mod stream_failure;
 pub(crate) mod tonic_ext;

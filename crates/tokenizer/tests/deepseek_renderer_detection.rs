@@ -593,7 +593,7 @@ mod tests {
     const V41_BOS: &str = "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}>";
     const V41_EOS: &str = "<\u{FF5C}end\u{2581}of\u{2581}sentence\u{FF5C}>";
     /// The system header carrying the default budget (thinking mode only).
-    const V41_DEFAULT_EFFORT_HEADER: &str = "<\u{FF5C}System\u{FF5C}>Reasoning Effort: 50 (range 1-100, the higher the value, the more thorough the reasoning)\n\n";
+    const V41_DEFAULT_EFFORT_HEADER: &str = "<\u{FF5C}System\u{FF5C}>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n";
     /// Tail of a single-user-turn prompt in thinking mode.
     const V41_THINKING_TAIL: &str = "<\u{FF5C}User\u{FF5C}>q<\u{FF5C}Assistant\u{FF5C}><think>";
     /// Tail of a single-user-turn prompt in chat mode.
@@ -692,7 +692,7 @@ mod tests {
             )
             .unwrap();
         assert!(
-            out.starts_with("<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}><\u{FF5C}System\u{FF5C}>Reasoning Effort: 50 (range"),
+            out.starts_with("<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}><\u{FF5C}System\u{FF5C}>Reasoning Effort: 75 (range"),
             "{out}"
         );
         assert!(
@@ -809,7 +809,7 @@ mod tests {
         ]);
         let out = render_v41_turn(&tokenizer, Some(&kw), None).unwrap();
         assert!(out.ends_with(V41_THINKING_TAIL), "{out}");
-        assert!(out.contains("Reasoning Effort: 50 (range"), "{out}");
+        assert!(out.contains("Reasoning Effort: 75 (range"), "{out}");
     }
 
     #[test]
@@ -821,7 +821,7 @@ mod tests {
         let off = render_v41_turn(&tokenizer, Some(&none_kw), None).unwrap();
         let low = render_v41_turn(&tokenizer, Some(&minimal_kw), None).unwrap();
         assert!(low.ends_with(V41_THINKING_TAIL));
-        assert!(low.contains("Reasoning Effort: 25 (range"));
+        assert!(low.contains("Reasoning Effort: 50 (range"));
         assert!(off.ends_with(V41_CHAT_TAIL), "{off}");
         // An explicit toggle wins over `minimal` exactly as it wins over `none`.
         let kw = HashMap::from([
@@ -830,7 +830,7 @@ mod tests {
         ]);
         let out = render_v41_turn(&tokenizer, Some(&kw), None).unwrap();
         assert!(out.ends_with(V41_THINKING_TAIL), "{out}");
-        assert!(out.contains("Reasoning Effort: 25 (range"), "{out}");
+        assert!(out.contains("Reasoning Effort: 50 (range"), "{out}");
     }
 
     #[test]
@@ -948,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn v41_tools_attach_to_a_mid_conversation_system_message() {
+    fn v41_tools_are_in_a_leading_system_message() {
         // The engine's V4.1 rule: tools attach to the FIRST system message wherever
         // it is, even when the conversation opens with a user turn — unlike
         // V3.2/V4, which only rewrite a *leading* system/developer message.
@@ -979,12 +979,8 @@ mod tests {
         };
         let out = tokenizer.apply_chat_template(&messages, params).unwrap();
         assert!(out.contains("get_weather"), "tool name missing: {out}");
-        // Tools must land on the existing mid-conversation system message's
-        // own content, not on a synthesized leading one.
-        assert!(
-            out.contains("S\n\n## Tools"),
-            "tools not attached to the mid-conversation system message: {out}"
-        );
+        assert!(out.find("## Tools").unwrap() < out.find("<｜User｜>hi").unwrap());
+        assert!(out.contains("<｜System｜>S<｜User｜>q"));
         assert_eq!(out.matches("## Tools").count(), 1, "{out}");
     }
 
@@ -1032,7 +1028,7 @@ mod tests {
         assert_eq!(from_typed, render(raw));
         assert!(
             from_typed.contains(
-                "\n\n{\"name\": \"lookup\", \"parameters\": {\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\"}}, \"required\": [\"query\"]}}\n\n"
+                "\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\"}}, \"required\": [\"query\"]}}\n\n"
             ),
             "{from_typed}"
         );
@@ -1060,7 +1056,7 @@ mod tests {
         // `add_generation_prompt: false` continues the final message.
         assert_eq!(
             out,
-            "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}><\u{FF5C}System\u{FF5C}>Reasoning Effort: 50 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<\u{FF5C}User\u{FF5C}>q<\u{FF5C}Assistant\u{FF5C}><think>r</think>Sure,"
+            "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}><\u{FF5C}System\u{FF5C}>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<\u{FF5C}User\u{FF5C}>q<\u{FF5C}Assistant\u{FF5C}><think>r</think>Sure,"
         );
     }
 

@@ -397,6 +397,16 @@ pub(crate) async fn prepare_chat_like(
             (None, _) => None,
         };
 
+        let tool_call_constraint = utils::continue_prefilled_tool_constraint(
+            tool_call_constraint,
+            tokenizer.as_ref(),
+            request
+                .tool_choice
+                .as_ref()
+                .is_some_and(ToolChoice::requires_call),
+        )
+        .map_err(|e| error::bad_request("invalid_tool_constraint", e))?;
+
         let preserve_reasoning_special_tokens = request.separate_reasoning
             && utils::reasoning_parser_requires_special_tokens(
                 &ctx.components.reasoning_parser_factory,

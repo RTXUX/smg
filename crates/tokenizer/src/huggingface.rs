@@ -1702,37 +1702,6 @@ fn apply_deepseek_v4(
     deepseek_v4::encode_messages(msgs, thinking_mode, &encode_params)
         .map_err(|e| Error::msg(format!("DeepSeek V4 encode failed: {e}")))
 }
-
-// ---------------------------------------------------------------------------
-// DeepSeek V4.1 dispatch shim
-// ---------------------------------------------------------------------------
-/// Attach `tools` to the FIRST message whose role is `system`, wherever it
-/// appears in the conversation — the engine's V4.1 rule. This differs from V3.2/V4's
-/// [`inject_tools_into_messages`], which only rewrites a *leading*
-/// system/developer message. Synthesizes an empty leading system message when
-/// none exists.
-fn inject_tools_into_first_system_message(
-    messages: &[serde_json::Value],
-    tools: Option<&[serde_json::Value]>,
-) -> Option<Vec<serde_json::Value>> {
-    let tools = tools?;
-    if tools.is_empty() {
-        return None;
-    }
-    let mut owned: Vec<serde_json::Value> = messages.to_vec();
-    let system_index = owned
-        .iter()
-        .position(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
-    let index = system_index.unwrap_or_else(|| {
-        owned.insert(0, serde_json::json!({ "role": "system", "content": "" }));
-        0
-    });
-    if let Some(obj) = owned[index].as_object_mut() {
-        obj.insert("tools".into(), serde_json::Value::Array(tools.to_vec()));
-    }
-    Some(owned)
-}
-
 /// A V4.1 boolean template kwarg (`thinking`, `drop_thinking`): `None` when
 /// absent or JSON `null`; a present value that isn't a JSON boolean is an
 /// error naming the key and the value. Unlike V3.2/V4's [`explicit_thinking`],
@@ -1787,20 +1756,13 @@ fn render_deepseek_v41(
     messages: &[serde_json::Value],
     params: &ChatTemplateParams,
 ) -> Result<Prompt> {
-    // `template_kwargs["response_format"]` is deliberately not attached to a
-    // message: the engine's Python renderer never renders V4.1's `## Response Format:` block
-    // (structured output is enforced by the constraint), so the gateway's
-    // projected kwarg is ignored here too. The encoder still renders a
-    // per-message `response_format` for direct callers.
-    let owned = inject_tools_into_first_system_message(messages, params.tools);
-    let mut msgs: Vec<serde_json::Value> = owned.unwrap_or_else(|| messages.to_vec());
+    let mut msgs = messages.to_vec();
 
     let effort_kwarg = params
         .template_kwargs
         .and_then(|k| k.get("reasoning_effort"));
     let effort_name = effort_kwarg.and_then(serde_json::Value::as_str);
-    // `"none"`/`"minimal"` are the gateway's thinking switch (both project to
-    // thinking off everywhere else in SMG), not effort levels.
+    // Only none disables thinking; minimal is the recipe's low effort.
     let effort_is_none = effort_name == Some("none");
     let reasoning_effort = if effort_is_none {
         None
@@ -1847,53 +1809,53 @@ fn render_deepseek_v41(
         drop_thinking,
         reasoning_effort,
     };
-    deepseek_v41::render_messages(&msgs, thinking_mode, &encode_params)
-        .map_err(|e| Error::msg(format!("DeepSeek V4.1 encode failed: {e}")))
+    deepseek_v41::render_conversation(
+        &msgs,
+        thinking_mode,
+        encode_params,
+        params.tools,
+        params
+            .template_kwargs
+            .and_then(|kwargs| kwargs.get("response_format")),
+        params
+            .template_kwargs
+            .and_then(|kwargs| kwargs.get("tool_choice")),
+    )
+    .map_err(|e| Error::msg(format!("DeepSeek V4.1 encode failed: {e}")))
 }
 
-/// Encode with the flat tokenizer to preserve its exact BPE boundaries, then replace only
-/// added-token occurrences outside the renderer's explicit special ranges with plain token IDs.
+/// Encode each plain region without the added vocabulary, and insert the
+/// renderer's explicit control-token IDs between regions, as deepseek-recipe does.
 fn encode_segmented_prompt(
     tokenizer: &HfTokenizer,
     text: &str,
     special_ranges: &[std::ops::Range<usize>],
 ) -> Result<Encoding> {
-    let flat = tokenizer
-        .encode(text, false)
-        .map_err(|e| Error::msg(format!("DeepSeek V4.1 encode failed: {e}")))?;
     let mut plain = tokenizer.clone();
     plain.with_added_vocabulary(AddedVocabulary::new());
-    let added = tokenizer.get_added_vocabulary();
-    let added = added.get_added_tokens_decoder();
-    let mut covered = vec![false; special_ranges.len()];
-    let mut ids = Vec::with_capacity(flat.get_ids().len());
-    for (&id, &(start, end)) in flat.get_ids().iter().zip(flat.get_offsets()) {
-        if !added.contains_key(&id) {
-            ids.push(id);
-            continue;
-        }
-        if let Some(index) = special_ranges
-            .iter()
-            .position(|range| range.start == start && range.end == end)
-        {
-            covered[index] = true;
-            ids.push(id);
-        } else {
-            let literal = &text[start..end];
-            let encoding = plain.encode(literal, false).map_err(|e| {
+    let mut regions = Vec::with_capacity(special_ranges.len() + 1);
+    let mut cursor = 0;
+    for range in special_ranges {
+        regions.push(&text[cursor..range.start]);
+        cursor = range.end;
+    }
+    regions.push(&text[cursor..]);
+    let encoded = plain
+        .encode_batch_fast(regions, false)
+        .map_err(|error| Error::msg(format!("DeepSeek V4.1 plain-text encode failed: {error}")))?;
+    let added = tokenizer.get_added_vocabulary().get_vocab();
+    let mut ids = Vec::new();
+    for (index, encoding) in encoded.iter().enumerate() {
+        ids.extend_from_slice(encoding.get_ids());
+        if let Some(range) = special_ranges.get(index) {
+            let token = &text[range.clone()];
+            let id = added.get(token).ok_or_else(|| {
                 Error::msg(format!(
-                    "DeepSeek V4.1 plain-text encode failed for {literal:?}: {e}"
+                    "DeepSeek V4.1 special token {token:?} is not an added token"
                 ))
             })?;
-            ids.extend_from_slice(encoding.get_ids());
+            ids.push(*id);
         }
-    }
-    if let Some(missing) = covered.iter().position(|covered| !covered) {
-        let range = &special_ranges[missing];
-        let token = &text[range.clone()];
-        return Err(Error::msg(format!(
-            "DeepSeek V4.1 special token {token:?} did not encode as one added token"
-        )));
     }
     Ok(Encoding::Plain(ids))
 }

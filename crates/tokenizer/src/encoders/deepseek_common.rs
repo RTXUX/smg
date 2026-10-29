@@ -416,13 +416,6 @@ pub(super) fn tool_schemas(tools: &[Value]) -> String {
     schemas.join("\n")
 }
 
-/// Python's `if msg.get("tools"):` — absent, null and `[]` are all falsy.
-pub(super) fn has_tools(msg: &Value) -> bool {
-    msg.get("tools")
-        .and_then(|v| v.as_array())
-        .is_some_and(|tools| !tools.is_empty())
-}
-
 /// The V4 family's `TOOLS_TEMPLATE`, one text for both dialects: `block` is
 /// the tool-calls block name (`tool_calls` for V4, ` calls` for V4.1) and
 /// `tags` the invoke and parameter tags, around the `tool_schemas` lines.

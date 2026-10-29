@@ -280,6 +280,15 @@ impl MessagePreparationStage {
         };
 
         // Step 5: Create stop sequence decoder
+        let tool_call_constraint = utils::continue_prefilled_tool_constraint(
+            tool_call_constraint,
+            tokenizer.as_ref(),
+            chat_tool_choice
+                .as_ref()
+                .is_some_and(ToolChoice::requires_call),
+        )
+        .map_err(|e| error::bad_request("invalid_tool_constraint", e))?;
+
         let stop_for_decoder = request
             .stop_sequences
             .as_ref()

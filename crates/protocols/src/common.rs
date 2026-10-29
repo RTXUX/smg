@@ -533,6 +533,14 @@ impl Default for ToolChoice {
 }
 
 impl ToolChoice {
+    /// Whether generation must make a call (possibly to one named tool).
+    pub fn requires_call(&self) -> bool {
+        match self {
+            Self::Value(ToolChoiceValue::Required) | Self::Function { .. } => true,
+            Self::AllowedTools { mode, .. } => mode == "required",
+            Self::Value(_) => false,
+        }
+    }
     /// Serialize tool_choice to string for ResponsesResponse
     ///
     /// Returns the JSON-serialized tool_choice or "auto" as default

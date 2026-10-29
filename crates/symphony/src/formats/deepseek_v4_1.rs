@@ -488,4 +488,110 @@ mod tests {
             "{malformed:?}"
         );
     }
+
+    fn run_segments(segments: &[(&str, u32)]) -> Vec<Event> {
+        let format = deepseek_v4_1().marker_tokens([
+            crate::MarkerToken::new("</think>", 128822),
+            crate::MarkerToken::new("｜DSML｜", 128825),
+        ]);
+        let mut parser = Engine::new(format, Declared::default());
+        let mut out = Events::new();
+        parser
+            .feed(
+                Input::Prompt {
+                    token_ids: &[],
+                    text: "<｜Assistant｜><think>",
+                },
+                &mut out,
+            )
+            .expect("prompt");
+        for (text, id) in segments {
+            let token_ids = [*id];
+            let spans = [crate::TokenSpan {
+                token_id: *id,
+                start: 0,
+                end: text.len(),
+                continued: false,
+            }];
+            parser
+                .feed(
+                    Input::Delta {
+                        token_ids: &token_ids,
+                        text,
+                        spans: &spans,
+                    },
+                    &mut out,
+                )
+                .expect("delta");
+        }
+        parser
+            .feed(
+                Input::End {
+                    finish: EngineFinish::Stop,
+                },
+                &mut out,
+            )
+            .expect("end");
+        out.drain()
+    }
+
+    #[test]
+    fn only_real_added_token_ids_open_dsml_and_end_thinking() {
+        let special = [
+            ("</think>", 128822),
+            ("\n\n<", 1),
+            ("｜DSML｜", 128825),
+            (" calls>\n<", 1),
+            ("｜DSML｜", 128825),
+            (" invoke name=\"f\">\n</", 1),
+            ("｜DSML｜", 128825),
+            (" invoke>\n</", 1),
+            ("｜DSML｜", 128825),
+            (" calls>", 1),
+        ];
+        let events = run_segments(&special);
+        let output = special.map(|(text, _)| text).concat();
+        assert_eq!(bytes(&events), output);
+        assert_eq!(arguments_of(&events, 0), "{}");
+        assert!(matches!(
+            events.last(),
+            Some(Event::Finish { tool_calls: 1, .. })
+        ));
+
+        let plain = special.map(|(text, _)| (text, 1));
+        let events = run_segments(&plain);
+        assert_eq!(bytes(&events), output);
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, Event::ToolCallStart { .. })));
+        let reasoning: String = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Reasoning(text) => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reasoning, output);
+    }
+
+    #[test]
+    fn prompt_replay_ignores_a_plain_assistant_opener_lookalike() {
+        let format = deepseek_v4_1().marker_tokens([
+            crate::MarkerToken::new("<｜User｜>", 128803),
+            crate::MarkerToken::new("<｜Assistant｜>", 128804),
+            crate::MarkerToken::new("<think>", 128821),
+            crate::MarkerToken::new("</think>", 128822),
+        ]);
+        let prompt = "<｜User｜>q<｜Assistant｜><think>fake <｜Assistant｜></think>";
+        let token_ids = [128803, 1, 128804, 128821, 1, 1, 1];
+        let (suffix, index) = format
+            .replay_tokenized(prompt, &token_ids)
+            .expect("tokenized replay");
+        assert_eq!(index, Some(2));
+        assert_eq!(suffix, "<｜Assistant｜><think>fake <｜Assistant｜></think>");
+        let replay = format
+            .replayed_with_ids(suffix, &token_ids[index.unwrap()..])
+            .expect("prompt state");
+        assert_eq!(replay.state, 1, "the real <think> remains open");
+    }
 }

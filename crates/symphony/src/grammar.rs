@@ -18,7 +18,7 @@ use openai_protocol::common::Tool;
 use serde_json::{json, Value};
 
 use crate::{
-    format::{CallSyntax, Emits, Format},
+    format::{CallSyntax, Emits, Format, MarkerToken},
     shape::{Layout, Message},
     tagged::{attributed::Typing, keyed::Tags as KeyedTags},
 };
@@ -60,14 +60,26 @@ pub enum Grammar {
     Plus(Box<Grammar>),
     /// `begin`, the content, `end`.
     Tag(Tag),
-    /// One token of the model's vocabulary, by its text: a marker written as that token, never
-    /// spelled in others ([`Format::marker_tokens`]).
-    Token(String),
+    /// A tag whose boundaries mix constant strings and added-token IDs. Serialized as a sequence.
+    MixedTag {
+        begin: Box<Grammar>,
+        content: Box<Grammar>,
+        end: Box<Grammar>,
+    },
+    /// One added token by numeric ID: a marker written as that token, never spelled in others.
+    Token(u32),
     /// Free text until one of `triggers` opens a tag; with `at_least_one`, at least one tag, the
     /// first at once; with `stop_after_first`, nothing after the first tag.
     TriggeredTags {
         triggers: Vec<String>,
         tags: Vec<Tag>,
+        at_least_one: bool,
+        stop_after_first: bool,
+    },
+    /// Free text until an added trigger token opens a tag whose beginning is that token.
+    TokenTriggeredTags {
+        trigger_tokens: Vec<u32>,
+        tags: Vec<TokenTag>,
         at_least_one: bool,
         stop_after_first: bool,
     },
@@ -108,6 +120,25 @@ impl Tag {
     }
 }
 
+/// A tag opened by one added token. Its content includes the remainder of the boundary text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TokenTag {
+    pub begin: u32,
+    pub content: Box<Grammar>,
+    pub end: String,
+}
+
+impl TokenTag {
+    fn to_json(&self) -> Value {
+        json!({
+            "type": "tag",
+            "begin": {"type": "token", "token": self.begin},
+            "content": self.content.to_json(),
+            "end": self.end,
+        })
+    }
+}
+
 impl Grammar {
     /// The grammar as the engine reads it.
     pub fn to_json(&self) -> Value {
@@ -134,6 +165,14 @@ impl Grammar {
             Self::Star(content) => json!({"type": "star", "content": content.to_json()}),
             Self::Plus(content) => json!({"type": "plus", "content": content.to_json()}),
             Self::Tag(tag) => tag.to_json(),
+            Self::MixedTag {
+                begin,
+                content,
+                end,
+            } => json!({
+                "type": "sequence",
+                "elements": [begin.to_json(), content.to_json(), end.to_json()],
+            }),
             Self::Token(token) => json!({"type": "token", "token": token}),
             Self::TriggeredTags {
                 triggers,
@@ -145,6 +184,20 @@ impl Grammar {
                     "type": "triggered_tags",
                     "triggers": triggers,
                     "tags": tags.iter().map(Tag::to_json).collect::<Vec<_>>(),
+                    "at_least_one": at_least_one,
+                }),
+                *stop_after_first,
+            ),
+            Self::TokenTriggeredTags {
+                trigger_tokens,
+                tags,
+                at_least_one,
+                stop_after_first,
+            } => stopping(
+                json!({
+                    "type": "token_triggered_tags",
+                    "trigger_tokens": trigger_tokens,
+                    "tags": tags.iter().map(TokenTag::to_json).collect::<Vec<_>>(),
                     "at_least_one": at_least_one,
                 }),
                 *stop_after_first,
@@ -181,6 +234,14 @@ impl Grammar {
             Self::Sequence(elements) | Self::Or(elements) => elements.iter().map(Self::nodes).sum(),
             Self::Optional(content) | Self::Star(content) | Self::Plus(content) => content.nodes(),
             Self::Tag(tag) => tag.content.nodes(),
+            Self::MixedTag {
+                begin,
+                content,
+                end,
+            } => begin.nodes() + content.nodes() + end.nodes(),
+            Self::TokenTriggeredTags { tags, .. } => {
+                tags.iter().map(|tag| tag.content.nodes()).sum()
+            }
             Self::TriggeredTags { tags, .. } | Self::TagsWithSeparator { tags, .. } => {
                 tags.iter().map(|tag| tag.content.nodes()).sum()
             }
@@ -188,18 +249,21 @@ impl Grammar {
     }
 }
 
-/// `grammar` with each of `tokens`, marker texts the longest first, written as a token element
-/// where it stands in a constant string; a tag keeps its begin and end, and a tag list its
-/// separator.
-fn bound(grammar: Grammar, tokens: &[String]) -> Grammar {
-    let in_tag = |tag: Tag| Tag {
-        content: Box::new(bound(*tag.content, tokens)),
-        ..tag
-    };
+/// `grammar` with each added token written by numeric ID. A tag whose boundary starts with an
+/// added token becomes a token-triggered tag; other mixed boundaries become string/token sequences.
+fn bound(grammar: Grammar, tokens: &[MarkerToken]) -> Grammar {
     let all = |elements: Vec<Grammar>| -> Vec<Grammar> {
         elements
             .into_iter()
             .map(|element| bound(element, tokens))
+            .collect()
+    };
+    let tag_content = |tags: Vec<Tag>| -> Vec<Tag> {
+        tags.into_iter()
+            .map(|tag| Tag {
+                content: Box::new(bound(*tag.content, tokens)),
+                ..tag
+            })
             .collect()
     };
     match grammar {
@@ -209,52 +273,126 @@ fn bound(grammar: Grammar, tokens: &[String]) -> Grammar {
         Grammar::Optional(content) => Grammar::Optional(Box::new(bound(*content, tokens))),
         Grammar::Star(content) => Grammar::Star(Box::new(bound(*content, tokens))),
         Grammar::Plus(content) => Grammar::Plus(Box::new(bound(*content, tokens))),
-        Grammar::Tag(tag) => Grammar::Tag(in_tag(tag)),
+        Grammar::Tag(tag) => {
+            if contains_marker(&tag.begin, tokens) || contains_marker(&tag.end, tokens) {
+                Grammar::MixedTag {
+                    begin: Box::new(split_tokens(tag.begin, tokens)),
+                    content: Box::new(bound(*tag.content, tokens)),
+                    end: Box::new(split_tokens(tag.end, tokens)),
+                }
+            } else {
+                Grammar::Tag(Tag {
+                    content: Box::new(bound(*tag.content, tokens)),
+                    ..tag
+                })
+            }
+        }
         Grammar::TriggeredTags {
             triggers,
             tags,
             at_least_one,
             stop_after_first,
-        } => Grammar::TriggeredTags {
-            triggers,
-            tags: tags.into_iter().map(in_tag).collect(),
-            at_least_one,
-            stop_after_first,
+        } => match token_tags(&tags, tokens) {
+            Some((trigger_tokens, tags)) => Grammar::TokenTriggeredTags {
+                trigger_tokens,
+                tags,
+                at_least_one,
+                stop_after_first,
+            },
+            None => Grammar::TriggeredTags {
+                triggers,
+                tags: tag_content(tags),
+                at_least_one,
+                stop_after_first,
+            },
         },
         Grammar::TagsWithSeparator {
             tags,
             separator,
             at_least_one,
             stop_after_first,
-        } => Grammar::TagsWithSeparator {
-            tags: tags.into_iter().map(in_tag).collect(),
-            separator,
-            at_least_one,
-            stop_after_first,
-        },
+        } => {
+            if separator.is_empty() && tags.iter().all(|tag| contains_marker(&tag.begin, tokens)) {
+                let calls = Grammar::Or(
+                    tags.into_iter()
+                        .map(|tag| Grammar::MixedTag {
+                            begin: Box::new(split_tokens(tag.begin, tokens)),
+                            content: Box::new(bound(*tag.content, tokens)),
+                            end: Box::new(split_tokens(tag.end, tokens)),
+                        })
+                        .collect(),
+                );
+                if stop_after_first {
+                    calls
+                } else if at_least_one {
+                    Grammar::Plus(Box::new(calls))
+                } else {
+                    Grammar::Star(Box::new(calls))
+                }
+            } else {
+                Grammar::TagsWithSeparator {
+                    tags: tag_content(tags),
+                    separator,
+                    at_least_one,
+                    stop_after_first,
+                }
+            }
+        }
         leaf @ (Grammar::AnyText { .. }
         | Grammar::Regex(_)
         | Grammar::JsonSchema { .. }
-        | Grammar::Token(_)) => leaf,
+        | Grammar::Token(_)
+        | Grammar::MixedTag { .. }
+        | Grammar::TokenTriggeredTags { .. }) => leaf,
     }
 }
 
-/// `text` as constant strings and tokens: each of `tokens` where it stands, leftmost first and of
-/// two at one place the longer; `text` as it is when it holds none.
-fn split_tokens(text: String, tokens: &[String]) -> Grammar {
-    if !tokens.iter().any(|token| text.contains(token.as_str())) {
+fn contains_marker(text: &str, tokens: &[MarkerToken]) -> bool {
+    tokens.iter().any(|token| text.contains(&token.text))
+}
+
+/// Convert string-triggered tags whose begins start with added tokens into token-triggered tags.
+/// The rest of each begin and the end move into the tag's content, preserving mixed boundaries.
+fn token_tags(tags: &[Tag], tokens: &[MarkerToken]) -> Option<(Vec<u32>, Vec<TokenTag>)> {
+    let mut trigger_tokens = Vec::new();
+    let mut converted = Vec::with_capacity(tags.len());
+    for tag in tags {
+        let token = tokens
+            .iter()
+            .find(|token| tag.begin.starts_with(&token.text))?;
+        if !trigger_tokens.contains(&token.id) {
+            trigger_tokens.push(token.id);
+        }
+        let content = Grammar::Sequence(vec![
+            split_tokens(tag.begin[token.text.len()..].to_string(), tokens),
+            bound((*tag.content).clone(), tokens),
+            split_tokens(tag.end.clone(), tokens),
+        ]);
+        converted.push(TokenTag {
+            begin: token.id,
+            content: Box::new(content),
+            end: String::new(),
+        });
+    }
+    Some((trigger_tokens, converted))
+}
+
+/// `text` as constant strings and numeric token IDs: each added token where it stands, leftmost
+/// first and of two at one place the longer; `text` as it is when it holds none.
+fn split_tokens(text: String, tokens: &[MarkerToken]) -> Grammar {
+    if !contains_marker(&text, tokens) {
         return Grammar::ConstString(text);
     }
     let mut pieces: Vec<Grammar> = Vec::new();
     let mut plain = String::new();
     let mut rest = text.as_str();
     while let Some(first) = rest.chars().next() {
-        if let Some(token) = tokens.iter().find(|token| rest.starts_with(token.as_str())) {
+        if let Some(token) = tokens.iter().find(|token| rest.starts_with(&token.text)) {
             if !plain.is_empty() {
                 pieces.push(Grammar::ConstString(std::mem::take(&mut plain)));
             }
-            pieces.push(Grammar::Token(token.clone()));
-            rest = &rest[token.len()..];
+            pieces.push(Grammar::Token(token.id));
+            rest = &rest[token.text.len()..];
         } else {
             plain.push(first);
             rest = &rest[first.len_utf8()..];
@@ -821,10 +959,8 @@ impl Format {
         excludes
     }
 
-    /// `grammar` with every marker that is one token ([`Format::marker_tokens`]) written as that
-    /// token where it stands in a constant string: inside a tag's content and between tags. A
-    /// tag's begin and end, its triggers, a separator and the texts free text excludes stay
-    /// strings, as the engines take them. Without such markers, `grammar` as it is.
+    /// `grammar` with every added marker token written by numeric ID, including mixed
+    /// string/token boundaries. Without such markers, `grammar` as it is.
     fn bounded(&self, grammar: Grammar) -> Grammar {
         let tokens = self.marker_token_texts();
         if tokens.is_empty() {
@@ -3345,15 +3481,34 @@ mod tests {
         }
     }
 
-    /// `grammar` with every token written back as its text: each constant string a marker
-    /// token cut apart joined again, so a bounded tag compares with the tag without tokens.
-    fn unbound(grammar: Grammar) -> Grammar {
-        let in_tag = |tag: Tag| Tag {
-            content: Box::new(unbound(*tag.content)),
-            ..tag
+    fn markers(tokens: &[(&str, u32)]) -> Vec<MarkerToken> {
+        tokens
+            .iter()
+            .map(|(text, id)| MarkerToken::new(*text, *id))
+            .collect()
+    }
+
+    fn token_text(id: u32, tokens: &[MarkerToken]) -> String {
+        tokens
+            .iter()
+            .find(|token| token.id == id)
+            .expect("the token's text")
+            .text
+            .clone()
+    }
+
+    fn into_text(grammar: Grammar) -> String {
+        let Grammar::ConstString(text) = grammar else {
+            panic!("expected constant text")
         };
+        text
+    }
+
+    /// `grammar` with every numeric token written back as its text, for comparison with the
+    /// unbound grammar. `separated` says which string-tag container the original used.
+    fn unbound(grammar: Grammar, tokens: &[MarkerToken], separated: bool) -> Grammar {
         match grammar {
-            Grammar::Token(text) => Grammar::ConstString(text),
+            Grammar::Token(id) => Grammar::ConstString(token_text(id, tokens)),
             Grammar::Sequence(elements) => {
                 let cut = elements.iter().any(|e| matches!(e, Grammar::Token(_)))
                     && elements
@@ -3362,19 +3517,45 @@ mod tests {
                 if cut {
                     let mut text = String::new();
                     for element in elements {
-                        if let Grammar::Token(piece) | Grammar::ConstString(piece) = element {
+                        if let Grammar::Token(id) = element {
+                            text.push_str(&token_text(id, tokens));
+                        } else if let Grammar::ConstString(piece) = element {
                             text.push_str(&piece);
                         }
                     }
                     return Grammar::ConstString(text);
                 }
-                Grammar::Sequence(elements.into_iter().map(unbound).collect())
+                Grammar::Sequence(
+                    elements
+                        .into_iter()
+                        .map(|element| unbound(element, tokens, separated))
+                        .collect(),
+                )
             }
-            Grammar::Or(elements) => Grammar::Or(elements.into_iter().map(unbound).collect()),
-            Grammar::Optional(content) => Grammar::Optional(Box::new(unbound(*content))),
-            Grammar::Star(content) => Grammar::Star(Box::new(unbound(*content))),
-            Grammar::Plus(content) => Grammar::Plus(Box::new(unbound(*content))),
-            Grammar::Tag(tag) => Grammar::Tag(in_tag(tag)),
+            Grammar::Or(elements) => Grammar::Or(
+                elements
+                    .into_iter()
+                    .map(|element| unbound(element, tokens, separated))
+                    .collect(),
+            ),
+            Grammar::Optional(content) => {
+                Grammar::Optional(Box::new(unbound(*content, tokens, separated)))
+            }
+            Grammar::Star(content) => Grammar::Star(Box::new(unbound(*content, tokens, separated))),
+            Grammar::Plus(content) => Grammar::Plus(Box::new(unbound(*content, tokens, separated))),
+            Grammar::Tag(tag) => Grammar::Tag(Tag {
+                content: Box::new(unbound(*tag.content, tokens, separated)),
+                ..tag
+            }),
+            Grammar::MixedTag {
+                begin,
+                content,
+                end,
+            } => Grammar::Tag(Tag {
+                begin: into_text(unbound(*begin, tokens, separated)),
+                content: Box::new(unbound(*content, tokens, separated)),
+                end: into_text(unbound(*end, tokens, separated)),
+            }),
             Grammar::TriggeredTags {
                 triggers,
                 tags,
@@ -3382,7 +3563,13 @@ mod tests {
                 stop_after_first,
             } => Grammar::TriggeredTags {
                 triggers,
-                tags: tags.into_iter().map(in_tag).collect(),
+                tags: tags
+                    .into_iter()
+                    .map(|tag| Tag {
+                        content: Box::new(unbound(*tag.content, tokens, separated)),
+                        ..tag
+                    })
+                    .collect(),
                 at_least_one,
                 stop_after_first,
             },
@@ -3392,11 +3579,61 @@ mod tests {
                 at_least_one,
                 stop_after_first,
             } => Grammar::TagsWithSeparator {
-                tags: tags.into_iter().map(in_tag).collect(),
+                tags: tags
+                    .into_iter()
+                    .map(|tag| Tag {
+                        content: Box::new(unbound(*tag.content, tokens, separated)),
+                        ..tag
+                    })
+                    .collect(),
                 separator,
                 at_least_one,
                 stop_after_first,
             },
+            Grammar::TokenTriggeredTags {
+                trigger_tokens,
+                tags,
+                at_least_one,
+                stop_after_first,
+            } => {
+                let tags = tags.into_iter().map(|tag| {
+                    let begin = token_text(tag.begin, tokens);
+                    let mut parts = match *tag.content {
+                        Grammar::Sequence(parts) => parts,
+                        other => vec![other],
+                    };
+                    let end = into_text(unbound(parts.pop().expect("tag end"), tokens, separated));
+                    let rest = into_text(unbound(parts.remove(0), tokens, separated));
+                    let content = match parts.len() {
+                        0 => Grammar::ConstString(String::new()),
+                        1 => unbound(parts.remove(0), tokens, separated),
+                        _ => unbound(Grammar::Sequence(parts), tokens, separated),
+                    };
+                    Tag {
+                        begin: format!("{begin}{rest}"),
+                        content: Box::new(content),
+                        end,
+                    }
+                });
+                if separated {
+                    Grammar::TagsWithSeparator {
+                        tags: tags.collect(),
+                        separator: String::new(),
+                        at_least_one,
+                        stop_after_first,
+                    }
+                } else {
+                    Grammar::TriggeredTags {
+                        triggers: trigger_tokens
+                            .into_iter()
+                            .map(|id| token_text(id, tokens))
+                            .collect(),
+                        tags: tags.collect(),
+                        at_least_one,
+                        stop_after_first,
+                    }
+                }
+            }
             other => other,
         }
     }
@@ -3404,12 +3641,12 @@ mod tests {
     #[test]
     fn a_marker_that_is_one_token_is_written_as_that_token_inside_a_tag() {
         // Gemma 4's string delimiter is one token of its vocabulary: inside each call's tag,
-        // every string stands between that token, not its spelling in other tokens; the tag's
-        // begin and end, the trigger and the prefix's excludes stay text, as the engines take
-        // them. Written back as text, the tag is the one without tokens.
+        // every string stands between that numeric token ID, not its spelling in other tokens;
+        // the call's opener is a token trigger. Written back as text, the tag is the original one.
         let tools = weather_tools();
         let plain = formats::gemma4();
-        let bounded = formats::gemma4().marker_tokens(["<|\"|>", "<|tool_call>", "<tool_call|>"]);
+        let markers = markers(&[("<|\"|>", 1), ("<|tool_call>", 2), ("<tool_call|>", 3)]);
+        let bounded = formats::gemma4().marker_tokens(markers.clone());
         for (at_least_one, reasoning_open, one_call) in [
             (true, false, false),
             (true, true, false),
@@ -3422,13 +3659,12 @@ mod tests {
             };
             let before = plain.grammar_for(&tools, options).expect("a grammar");
             let after = bounded.grammar_for(&tools, options).expect("a grammar");
-            assert_eq!(unbound(after.clone()), before);
+            assert_eq!(unbound(after.clone(), &markers, false), before);
             let payload = after.payload();
             let (mut tokens, mut strings) = (Vec::new(), Vec::new());
             nodes_of(&payload, "token", &mut tokens);
             nodes_of(&payload, "const_string", &mut strings);
-            assert!(!tokens.is_empty());
-            assert!(tokens.iter().all(|token| token["token"] == "<|\"|>"));
+            assert!(tokens.iter().any(|token| token["token"] == 1));
             assert!(strings
                 .iter()
                 .all(|string| !string["value"].as_str().unwrap_or("").contains("<|\"|>")));
@@ -3437,8 +3673,11 @@ mod tests {
             } else {
                 &payload["format"]
             };
-            assert_eq!(tags["triggers"], value!(["<|tool_call>"]));
-            assert_eq!(tags["tags"][0]["begin"], "<|tool_call>call:get_weather{");
+            assert_eq!(tags["trigger_tokens"], value!([2]));
+            assert_eq!(
+                tags["tags"][0]["begin"],
+                value!({"type": "token", "token": 2})
+            );
         }
         // The answer holds no marker, and is the same.
         assert_eq!(answer(&bounded, true), answer(&plain, true));
@@ -3446,78 +3685,72 @@ mod tests {
 
     #[test]
     fn a_token_inside_a_longer_marker_is_cut_out_of_it() {
-        // DeepSeek V4.1's block opener begins with one token, `<｜DSML｜`: the opener, written
-        // before the invokes, takes that token and the rest as text; the close, which does not
-        // hold it, stays text, and the invokes' tags keep their begins and ends.
+        // DeepSeek V4.1's `｜DSML｜` added token is numeric wherever it occurs in the block and
+        // invoke boundaries; the brackets, function names, and other boundary text stay strings.
         let tools = weather_tools();
-        let plain = formats::deepseek_v4_1();
-        let bounded = formats::deepseek_v4_1().marker_tokens(["<｜DSML｜"]);
+        let dsml = markers(&[("｜DSML｜", 128825)]);
+        let bounded = formats::deepseek_v4_1().marker_tokens(dsml.clone());
         let grammar = bounded.grammar(&tools, true, false).expect("a grammar");
-        assert_eq!(
-            Some(unbound(grammar.clone())),
-            plain.grammar(&tools, true, false)
-        );
         let payload = grammar.payload();
         assert_eq!(
             payload["format"]["elements"][0],
             value!({"type": "sequence", "elements": [
-                {"type": "const_string", "value": "\n\n"},
-                {"type": "token", "token": "<｜DSML｜"},
+                {"type": "const_string", "value": "\n\n<"},
+                {"type": "token", "token": 128825},
                 {"type": "const_string", "value": " calls>\n"},
             ]})
         );
         assert_eq!(
             payload["format"]["elements"][2],
-            value!({"type": "const_string", "value": "</｜DSML｜ calls>"})
+            value!({"type": "sequence", "elements": [
+                {"type": "const_string", "value": "</"},
+                {"type": "token", "token": 128825},
+                {"type": "const_string", "value": " calls>"},
+            ]})
         );
-        assert_eq!(
-            payload["format"]["elements"][1]["tags"][0]["begin"],
-            "<｜DSML｜ invoke name=\"get_weather\">\n"
-        );
-        // Kimi K3's tags are made of its structural tokens: every argument tag inside a call
-        // writes them as tokens, and the block's ways in stay text.
-        let kimi = formats::kimi_k3().marker_tokens(["<|open|>", "<|close|>", "<|sep|>"]);
+        assert_eq!(payload["format"]["elements"][1]["type"], "plus");
+        let mut dsml_tokens = Vec::new();
+        nodes_of(&payload["format"]["elements"][1], "token", &mut dsml_tokens);
+        assert!(!dsml_tokens.is_empty());
+        assert!(dsml_tokens.iter().all(|token| token["token"] == 128825));
+        // Kimi K3's argument tags also use token identity.
+        let kimi_markers = markers(&[("<|open|>", 10), ("<|close|>", 11), ("<|sep|>", 12)]);
+        let kimi = formats::kimi_k3().marker_tokens(kimi_markers);
         let grammar = kimi.grammar(&tools, true, true).expect("a grammar");
-        assert_eq!(
-            Some(unbound(grammar.clone())),
-            formats::kimi_k3().grammar(&tools, true, true)
-        );
         let payload = grammar.payload();
         let mut tokens = Vec::new();
         nodes_of(&payload, "token", &mut tokens);
-        assert!(tokens.iter().any(|token| token["token"] == "<|sep|>"));
-        assert_eq!(
-            payload["format"]["triggers"],
-            value!([
-                "<|open|>tools<|sep|>",
-                "<|close|>think<|sep|>",
-                "<|close|>response<|sep|>"
-            ])
-        );
+        assert!(tokens.iter().any(|token| token["token"] == 12));
+        assert_eq!(payload["format"]["trigger_tokens"], value!([10, 11]));
     }
 
     #[test]
     fn the_marker_tokens_are_the_tables_own_the_longest_first() {
         // A token no marker holds is no marker's; the empty text is none; of two, the longer is
         // tried first, so a token inside a longer one never cuts it.
-        let format = formats::kimi_k3().marker_tokens([
-            "<|sep|>",
-            "hello",
-            "",
-            "<|open|>",
-            "<|close|>message<|sep|>",
-            "<|sep|>",
-        ]);
+        let format = formats::kimi_k3().marker_tokens(markers(&[
+            ("<|sep|>", 1),
+            ("hello", 2),
+            ("", 3),
+            ("<|open|>", 4),
+            ("<|close|>message<|sep|>", 5),
+            ("<|sep|>", 1),
+        ]));
+        let texts = |format: &Format| {
+            format
+                .marker_token_texts()
+                .iter()
+                .map(|token| token.text.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            format.marker_token_texts(),
+            texts(&format),
             ["<|close|>message<|sep|>", "<|open|>", "<|sep|>"]
         );
         assert!(formats::kimi_k3().marker_token_texts().is_empty());
         // The syntax's own tags count: Gemma 4's string delimiter is no terminal.
         assert_eq!(
-            formats::gemma4()
-                .marker_tokens(["<|\"|>"])
-                .marker_token_texts(),
+            texts(&formats::gemma4().marker_tokens(markers(&[("<|\"|>", 6)]))),
             ["<|\"|>"]
         );
     }

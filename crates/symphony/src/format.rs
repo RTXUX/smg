@@ -97,7 +97,8 @@ use std::sync::Arc;
 use crate::{
     engine::is_strip_space,
     gemma,
-    markers::{Piece, Scanner},
+    input::TokenSpan,
+    markers::{prompt_token_ranges, Piece, Scanner},
     pythonic,
     shape::{CallShape, Layout, ValueRead, Values},
     tagged::{self, attributed::TagEnd, keyed},
@@ -218,6 +219,22 @@ impl CallSyntax {
     }
 }
 
+/// One added token that can form part of a format's markers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkerToken {
+    pub text: String,
+    pub id: u32,
+}
+
+impl MarkerToken {
+    pub fn new(text: impl Into<String>, id: u32) -> Self {
+        Self {
+            text: text.into(),
+            id,
+        }
+    }
+}
+
 /// What the text inside a state is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Emits {
@@ -250,7 +267,7 @@ pub struct Format {
     /// How a shaped call's values read.
     values: Values,
     thinks_first: bool,
-    marker_tokens: Vec<String>,
+    marker_tokens: Vec<MarkerToken>,
     /// How the model's chat template writes a turn, where the table holds one.
     layout: Option<Box<Layout>>,
 }
@@ -543,42 +560,47 @@ impl Format {
         self.thinks_first
     }
 
-    /// The texts among `tokens` (the model's vocabulary's added tokens, by their text) that the
-    /// table's markers are made of: a terminal, a structural token or one of the call syntax's
-    /// tags that is one token, or a token inside one (`<|open|>` in Kimi K3's tags). The
-    /// structural tags write each as that token wherever they write it inside a tag or between
-    /// tags, so the model cannot spell it in ordinary tokens there; a tag's own begin and end and
-    /// its triggers stay text. Parsing does not change. It reads the markers the table has when
-    /// it is called, so it comes after the rows, and called again it replaces the set.
+    /// The added tokens among `tokens` that the table's markers are made of: a terminal, a
+    /// structural token, the turn opener, one of the call syntax's tags, or a token inside one.
+    /// Structural generation writes each by its numeric ID, and tokenized parsing accepts its
+    /// spelling only from that ID. It reads the markers the table has when called, so it comes
+    /// after the rows, and called again it replaces the set.
     #[must_use]
-    pub fn marker_tokens<T: AsRef<str>>(mut self, tokens: impl IntoIterator<Item = T>) -> Self {
+    pub fn marker_tokens(mut self, tokens: impl IntoIterator<Item = MarkerToken>) -> Self {
         let mut markers: Vec<&str> = self
             .terminals
             .iter()
             .map(|terminal| terminal.text.as_str())
             .chain(self.structural_tokens.iter().map(String::as_str))
+            .chain(self.turn_opener.as_deref())
             .collect();
         let tags = self
             .calls
             .map(|syntax| syntax.tag_texts())
             .unwrap_or_default();
         markers.extend(tags);
-        let mut kept: Vec<String> = tokens
+        let mut kept: Vec<MarkerToken> = tokens
             .into_iter()
-            .map(|token| token.as_ref().to_string())
             .filter(|token| {
-                !token.is_empty() && markers.iter().any(|marker| marker.contains(token.as_str()))
+                !token.text.is_empty()
+                    && markers
+                        .iter()
+                        .any(|marker| marker.contains(token.text.as_str()))
             })
             .collect();
-        // The longest first, so a token inside a longer one is never taken for part of it.
-        kept.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        kept.sort_by(|a, b| {
+            b.text
+                .len()
+                .cmp(&a.text.len())
+                .then_with(|| a.text.cmp(&b.text))
+        });
         kept.dedup();
         self.marker_tokens = kept;
         self
     }
 
-    /// The marker texts that are one token each, the longest first.
-    pub(crate) fn marker_token_texts(&self) -> &[String] {
+    /// The added tokens that form marker segments, the longest text first.
+    pub(crate) fn marker_token_texts(&self) -> &[MarkerToken] {
         &self.marker_tokens
     }
 
@@ -720,6 +742,45 @@ impl Format {
         }
     }
 
+    /// Token-aware replay: a turn opener that is a bound added token is found by ID, so its
+    /// plain-text lookalikes do not count. The optional index slices the prompt IDs the same way.
+    pub fn replay_tokenized<'p>(
+        &self,
+        prompt: &'p str,
+        token_ids: &[u32],
+    ) -> Result<(&'p str, Option<usize>), String> {
+        match self.tokenized_turn(prompt, token_ids)? {
+            Some((turn, index)) => Ok((turn, Some(index))),
+            None => Ok((self.replay(prompt), None)),
+        }
+    }
+
+    fn tokenized_turn<'p>(
+        &self,
+        prompt: &'p str,
+        token_ids: &[u32],
+    ) -> Result<Option<(&'p str, usize)>, String> {
+        if !self.anchors.is_empty() || token_ids.is_empty() {
+            return Ok(None);
+        }
+        let Some(opener) = self.turn_opener() else {
+            return Ok(None);
+        };
+        let Some(token) = self.marker_tokens.iter().find(|token| token.text == opener) else {
+            return Ok(None);
+        };
+        let Some(index) = token_ids.iter().rposition(|&id| id == token.id) else {
+            return Ok(None);
+        };
+        let ranges = prompt_token_ranges(prompt, token_ids, &self.marker_tokens)
+            .ok_or_else(|| "prompt text does not match its special token IDs".to_string())?;
+        let range = ranges
+            .iter()
+            .rfind(|special| special.id == token.id)
+            .ok_or_else(|| "prompt turn opener has no visible token text".to_string())?;
+        Ok(Some((&prompt[range.range.start..], index)))
+    }
+
     /// The text of `prompt` the engine replays, and the state the replay starts in: after the
     /// last turn anchor, in the state it names; otherwise [`Self::replay`]'s part, from the first
     /// state.
@@ -794,15 +855,55 @@ impl Format {
     /// walk stands, moving nothing; and the stay the output continues. A call the prompt left
     /// open is not entered: the walk rests where the turn started. The engine starts the output
     /// where this leaves it, and [`Self::reasoning_open`] reads the same walk.
+    #[expect(
+        clippy::panic,
+        reason = "text-only replay has no token provenance to reject"
+    )]
     pub(crate) fn replayed(&self, prompt: &str) -> Replay {
-        let (turn, start) = self.turn(prompt);
-        let mut scanner = Scanner::new(self.terminal_texts());
+        match self.replayed_with_ids(prompt, &[]) {
+            Ok(replay) => replay,
+            Err(_) => panic!("text-only prompt replay failed"),
+        }
+    }
+
+    pub(crate) fn replayed_with_ids(
+        &self,
+        prompt: &str,
+        token_ids: &[u32],
+    ) -> Result<Replay, String> {
+        let (turn, start, token_ids) = match self.tokenized_turn(prompt, token_ids)? {
+            Some((turn, index)) => (turn, 0, &token_ids[index..]),
+            None => {
+                let (turn, start) = self.turn(prompt);
+                (turn, start, &[] as &[u32])
+            }
+        };
+        let spans = if token_ids.is_empty() {
+            Vec::new()
+        } else {
+            prompt_token_ranges(turn, token_ids, &self.marker_tokens)
+                .ok_or_else(|| "prompt text does not match its special token IDs".to_string())?
+                .into_iter()
+                .map(|special| TokenSpan {
+                    token_id: special.id,
+                    start: special.range.start,
+                    end: special.range.end,
+                    continued: false,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut scanner = Scanner::with_tokens(self.terminal_texts(), &self.marker_tokens);
         let (mut state, mut rest) = (start, start);
         // Whether the prompt wrote text other than whitespace in the stay the output continues.
         let mut begun = false;
         // An anchor that names its own state leaves no start to choose.
         let mut at_turn_start = self.start.is_some() && start == 0;
-        let pieces = scanner.feed(turn).into_iter().chain(scanner.finish());
+        let pieces = if token_ids.is_empty() {
+            scanner.feed(turn)
+        } else {
+            scanner.feed_tokenized(turn, &spans, &self.marker_tokens)
+        };
+        let pieces = pieces.into_iter().chain(scanner.finish());
         for piece in pieces {
             if at_turn_start {
                 if let Some(opened) = self.opening(state, &piece) {
@@ -829,11 +930,11 @@ impl Format {
         if self.emits(state) == Emits::Arguments {
             (state, begun) = (rest, false);
         }
-        Replay {
+        Ok(Replay {
             state,
             at_turn_start,
             begun,
-        }
+        })
     }
 
     /// The state `prompt` leaves the table in ([`Self::replayed`]): where the engine starts the

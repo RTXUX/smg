@@ -1293,11 +1293,12 @@ fn read_probe(format: &Format, prompt: &str, output: &str) -> Value {
 /// a tag list's free text and tags follow the engines' `at_least_one` and `stop_after_first`.
 fn ends(grammar: &Grammar, text: &str, at: usize) -> Vec<usize> {
     let mut found: Vec<usize> = match grammar {
-        Grammar::ConstString(literal) | Grammar::Token(literal) => text[at..]
+        Grammar::ConstString(literal) => text[at..]
             .starts_with(literal.as_str())
             .then_some(at + literal.len())
             .into_iter()
             .collect(),
+        Grammar::Token(_) => Vec::new(),
         Grammar::AnyText { excludes } => free(text, at, excludes),
         Grammar::JsonSchema { schema, .. } => json_ends(schema, text, at),
         Grammar::Regex(_) => Vec::new(),
@@ -1315,6 +1316,19 @@ fn ends(grammar: &Grammar, text: &str, at: usize) -> Vec<usize> {
         Grammar::Star(inner) => repeated(inner, text, at, 0),
         Grammar::Plus(inner) => repeated(inner, text, at, 1),
         Grammar::Tag(tag) => tag_ends(tag, text, at),
+        Grammar::MixedTag {
+            begin,
+            content,
+            end,
+        } => [begin, content, end]
+            .into_iter()
+            .fold(vec![at], |starts, part| {
+                starts
+                    .iter()
+                    .flat_map(|&start| ends(part, text, start))
+                    .collect()
+            }),
+        Grammar::TokenTriggeredTags { .. } => Vec::new(),
         Grammar::TriggeredTags {
             triggers,
             tags,

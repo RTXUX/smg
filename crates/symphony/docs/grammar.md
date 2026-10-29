@@ -100,8 +100,10 @@ whose template writes the thought before every call and answer (`Format::thinks_
 written first, its opener, its text and its close, where the prompt has not opened it; every other
 table leaves the thought to the model, as gpt-oss's template leaves its analysis channel.
 
-A marker that is one token of the model's vocabulary (`Format::marker_tokens`: a terminal, a
+An added token of the model's vocabulary (`Format::marker_tokens`: a terminal, a turn opener, a
 structural token, one of the syntax's own tags (`CallSyntax::tag_texts`), or a token inside one) is
-written as that token (`Grammar::Token`) wherever a tag writes it inside a tag or between tags, so
-the model cannot spell it in ordinary tokens there; a tag's begin and end and its triggers stay
-text, as the engines' `triggered_tags` takes them.
+written by its numeric ID (`Grammar::Token`) wherever a tag writes it inside a tag or between tags,
+so the model cannot spell it in ordinary tokens there. Mixed string/token boundaries use sequences;
+triggered tags whose begins are added tokens use `token_triggered_tags`, and separated empty-separator
+calls use repetition over mixed tags. Tokenized parsing applies the same identity rule: the spelling
+alone is content unless the required ID produced it.

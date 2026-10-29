@@ -9,6 +9,8 @@
 //! The scanner knows nothing about what the markers mean; the format does. At a position where
 //! several markers match, the longest wins, and a marker that is a prefix of another (`ab` and
 //! `abc`) is told apart only once enough bytes are there, so `ab` at the end of the text is held.
+//! With token spans, an added-token segment of a marker matches only its numeric ID; ordinary
+//! tokens spelling the same text stay content. Text-only callers retain spelling-based matching.
 
 /// What a piece of the model's text turned out to be.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,27 +21,87 @@ pub enum Piece {
     Marker(usize),
 }
 
+use std::ops::Range;
+
+use crate::{format::MarkerToken, input::TokenSpan};
+
+/// A visible added token's byte range and numeric ID.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TokenTextRange {
+    pub range: Range<usize>,
+    pub id: u32,
+}
+
+#[derive(Clone, Debug)]
+struct SpecialSegment {
+    range: Range<usize>,
+    id: u32,
+}
+
+#[derive(Clone, Debug)]
+struct Marker {
+    text: String,
+    special: Vec<SpecialSegment>,
+}
+
+impl Marker {
+    fn new(text: String, tokens: &[MarkerToken]) -> Self {
+        let mut special = Vec::new();
+        for token in tokens {
+            for (start, spelling) in text.match_indices(&token.text) {
+                special.push(SpecialSegment {
+                    range: start..start + spelling.len(),
+                    id: token.id,
+                });
+            }
+        }
+        Self { text, special }
+    }
+
+    fn matches_provenance(&self, at: usize, specials: &[TokenTextRange]) -> bool {
+        self.special.iter().all(|segment| {
+            let range = at + segment.range.start..at + segment.range.end;
+            specials
+                .iter()
+                .any(|special| special.range == range && special.id == segment.id)
+        })
+    }
+}
+
 /// Splits a growing text into content and markers, holding back only what may still be a marker.
 #[derive(Clone, Debug)]
 pub struct Scanner {
-    markers: Vec<String>,
+    markers: Vec<Marker>,
     held: String,
+    held_special: Vec<TokenTextRange>,
+    held_tokenized: bool,
 }
 
 impl Scanner {
-    /// A scanner for `markers`, each reported by its position in the list as given. With none,
-    /// every byte is text. An empty string never matches, so the scan always moves forward, and of
-    /// two equal markers the first in the list is the one reported.
+    /// A spelling-based scanner for `markers`, for callers without token provenance.
     pub fn new(markers: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self::with_tokens(markers, &[])
+    }
+
+    /// A scanner whose added-token marker segments require their numeric IDs on tokenized input.
+    pub fn with_tokens(
+        markers: impl IntoIterator<Item = impl Into<String>>,
+        tokens: &[MarkerToken],
+    ) -> Self {
         Self {
-            markers: markers.into_iter().map(Into::into).collect(),
+            markers: markers
+                .into_iter()
+                .map(|text| Marker::new(text.into(), tokens))
+                .collect(),
             held: String::new(),
+            held_special: Vec::new(),
+            held_tokenized: false,
         }
     }
 
     /// The marker a [`Piece::Marker`] refers to.
     pub fn marker(&self, index: usize) -> &str {
-        &self.markers[index]
+        &self.markers[index].text
     }
 
     /// The bytes held back because they may still become a marker.
@@ -47,22 +109,56 @@ impl Scanner {
         &self.held
     }
 
-    /// Append the next bytes and return what is now certain, in order: text that cannot be part of
-    /// a marker, and the markers found. Whatever may still become a marker stays held.
+    /// Append text without token provenance, accepting markers by spelling.
     pub fn feed(&mut self, bytes: &str) -> Vec<Piece> {
+        self.append(bytes, &[], false)
+    }
+
+    /// Append decoded text with token spans. Only spans whose IDs are marker tokens contribute
+    /// provenance; plain tokens spelling the same text do not open a special marker segment.
+    pub fn feed_tokenized(
+        &mut self,
+        bytes: &str,
+        spans: &[TokenSpan],
+        tokens: &[MarkerToken],
+    ) -> Vec<Piece> {
+        let specials = spans
+            .iter()
+            .filter(|span| tokens.iter().any(|token| token.id == span.token_id))
+            .map(|span| TokenTextRange {
+                range: span.start..span.end,
+                id: span.token_id,
+            })
+            .collect::<Vec<_>>();
+        self.append(bytes, &specials, true)
+    }
+
+    fn append(&mut self, bytes: &str, specials: &[TokenTextRange], tokenized: bool) -> Vec<Piece> {
+        let held_len = self.held.len();
         let text = std::mem::take(&mut self.held) + bytes;
-        self.scan(text, true)
+        let mut all_special = std::mem::take(&mut self.held_special);
+        all_special.extend(specials.iter().map(|special| TokenTextRange {
+            range: special.range.start + held_len..special.range.end + held_len,
+            id: special.id,
+        }));
+        self.held_tokenized = tokenized;
+        self.scan(text, all_special, true)
     }
 
     /// No more bytes will come: what was held is a marker if it is one whole, and text otherwise.
     pub fn finish(mut self) -> Vec<Piece> {
         let text = std::mem::take(&mut self.held);
-        self.scan(text, false)
+        let specials = std::mem::take(&mut self.held_special);
+        let tokenized = self.held_tokenized;
+        self.scan(text, specials, tokenized)
     }
 
-    /// Split `text` into pieces. With `more_may_come`, a tail that could still grow into a marker
-    /// is held instead of released.
-    fn scan(&mut self, text: String, more_may_come: bool) -> Vec<Piece> {
+    fn scan(
+        &mut self,
+        text: String,
+        specials: Vec<TokenTextRange>,
+        more_may_come: bool,
+    ) -> Vec<Piece> {
         let mut pieces = Vec::new();
         let mut released = 0;
         let mut at = 0;
@@ -71,12 +167,20 @@ impl Scanner {
             if more_may_come && self.could_grow_into_marker(rest) {
                 Self::release(&mut pieces, &text[released..at]);
                 self.held = rest.to_string();
+                self.held_special = specials
+                    .into_iter()
+                    .filter(|special| special.range.start >= at)
+                    .map(|special| TokenTextRange {
+                        range: special.range.start - at..special.range.end - at,
+                        id: special.id,
+                    })
+                    .collect();
                 return pieces;
             }
-            if let Some(index) = self.longest_marker_at(rest) {
+            if let Some(index) = self.longest_marker_at(&text, at, &specials) {
                 Self::release(&mut pieces, &text[released..at]);
                 pieces.push(Piece::Marker(index));
-                at += self.markers[index].len();
+                at += self.markers[index].text.len();
                 released = at;
             } else {
                 at += rest.chars().next().map_or(1, char::len_utf8);
@@ -90,16 +194,26 @@ impl Scanner {
     fn could_grow_into_marker(&self, rest: &str) -> bool {
         self.markers
             .iter()
-            .any(|marker| marker.len() > rest.len() && marker.starts_with(rest))
+            .any(|marker| marker.text.len() > rest.len() && marker.text.starts_with(rest))
     }
 
-    /// The longest marker that `rest` starts with, by index; of equal ones, the first in the list.
-    fn longest_marker_at(&self, rest: &str) -> Option<usize> {
+    /// The longest marker that starts at `at`, by index; of equal ones, the first in the list.
+    fn longest_marker_at(
+        &self,
+        text: &str,
+        at: usize,
+        specials: &[TokenTextRange],
+    ) -> Option<usize> {
+        let rest = &text[at..];
         let mut found: Option<(usize, usize)> = None;
         for (index, marker) in self.markers.iter().enumerate() {
-            let longer = found.is_none_or(|(_, length)| marker.len() > length);
-            if !marker.is_empty() && longer && rest.starts_with(marker.as_str()) {
-                found = Some((index, marker.len()));
+            let longer = found.is_none_or(|(_, length)| marker.text.len() > length);
+            if !marker.text.is_empty()
+                && longer
+                && rest.starts_with(&marker.text)
+                && (!self.held_tokenized || marker.matches_provenance(at, specials))
+            {
+                found = Some((index, marker.text.len()));
             }
         }
         found.map(|(index, _)| index)
@@ -110,6 +224,28 @@ impl Scanner {
             pieces.push(Piece::Text(text.to_string()));
         }
     }
+}
+
+/// Associate prompt token IDs with their visible added-token spellings. Each spelling's IDs and
+/// matches occur in the same order, so no full token-to-byte decode is needed.
+pub(crate) fn prompt_token_ranges(
+    text: &str,
+    token_ids: &[u32],
+    tokens: &[MarkerToken],
+) -> Option<Vec<TokenTextRange>> {
+    let mut ranges = Vec::new();
+    for token in tokens {
+        let mut occurrences = text.match_indices(&token.text);
+        for &id in token_ids.iter().filter(|&&id| id == token.id) {
+            let (start, spelling) = occurrences.next()?;
+            ranges.push(TokenTextRange {
+                range: start..start + spelling.len(),
+                id,
+            });
+        }
+    }
+    ranges.sort_by_key(|special| special.range.start);
+    Some(ranges)
 }
 
 #[cfg(test)]

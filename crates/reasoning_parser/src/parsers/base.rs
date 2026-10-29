@@ -14,6 +14,8 @@ pub struct BaseReasoningParser {
     buffer: String,
     stripped_think_start: bool,
     model_type: String,
+    tool_starts: Vec<(&'static str, Option<&'static str>)>,
+    tool_started: bool,
 }
 
 impl BaseReasoningParser {
@@ -26,6 +28,8 @@ impl BaseReasoningParser {
             buffer: String::new(),
             stripped_think_start: false,
             model_type: "base".to_string(),
+            tool_starts: Vec::new(),
+            tool_started: false,
         }
     }
 
@@ -33,6 +37,101 @@ impl BaseReasoningParser {
     pub fn with_model_type(mut self, model_type: String) -> Self {
         self.model_type = model_type;
         self
+    }
+
+    /// A tool opener ends an open thought without consuming the opener.
+    /// A guarded block opener must be followed by an invoke (after whitespace),
+    /// so mentioning a DSML block in reasoning does not start a tool call.
+    pub fn with_tool_start(mut self, start: &'static str, following: Option<&'static str>) -> Self {
+        self.tool_starts.push((start, following));
+        self
+    }
+
+    fn drain_with_tool_starts(&mut self, at_end: bool) -> ParserResult {
+        let (mut normal, mut reasoning) = (String::new(), String::new());
+        while !self.buffer.is_empty() {
+            if self.tool_started {
+                normal.push_str(&std::mem::take(&mut self.buffer));
+                break;
+            }
+            let delimiter = if self.in_reasoning {
+                &self.config.think_end_token
+            } else {
+                &self.config.think_start_token
+            };
+            let mut hit = self
+                .buffer
+                .find(delimiter)
+                .map(|index| (index, delimiter.len(), !self.in_reasoning));
+            let mut pending = self.buffer.len();
+            if self.in_reasoning {
+                if let Some(index) = self.buffer.find(&self.config.think_start_token) {
+                    if hit.is_none_or(|(before, _, _)| index < before) {
+                        hit = Some((index, self.config.think_start_token.len(), true));
+                    }
+                }
+                for (start, following) in &self.tool_starts {
+                    for (index, _) in self.buffer.match_indices(*start) {
+                        let tail = self.buffer[index + start.len()..].trim_start();
+                        if following.is_none_or(|prefix| tail.starts_with(prefix)) {
+                            if hit.is_none_or(|(before, _, _)| index < before) {
+                                hit = Some((index, 0, false));
+                            }
+                            break;
+                        }
+                        if !at_end && following.is_some_and(|prefix| prefix.starts_with(tail)) {
+                            pending = pending.min(index);
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some((index, consumed, reasoning_next)) =
+                hit.filter(|(index, _, _)| *index <= pending)
+            {
+                let sink = if self.in_reasoning {
+                    &mut reasoning
+                } else {
+                    &mut normal
+                };
+                sink.push_str(&self.buffer[..index]);
+                self.buffer.drain(..index + consumed);
+                if consumed == 0 {
+                    self.tool_started = true;
+                }
+                self.in_reasoning = reasoning_next;
+                continue;
+            }
+            if !at_end {
+                // Hold every suffix that can still become a delimiter or tool
+                // opener, including a marker split after ordinary reasoning.
+                for (index, _) in self.buffer.char_indices() {
+                    let suffix = &self.buffer[index..];
+                    if (delimiter.len() > suffix.len() && delimiter.starts_with(suffix))
+                        || (self.config.think_start_token.len() > suffix.len()
+                            && self.config.think_start_token.starts_with(suffix))
+                        || (self.in_reasoning
+                            && self.tool_starts.iter().any(|(start, _)| {
+                                start.len() > suffix.len() && start.starts_with(suffix)
+                            }))
+                    {
+                        pending = pending.min(index);
+                    }
+                }
+            }
+            if self.in_reasoning && !self.config.stream_reasoning && !at_end {
+                break;
+            }
+            let sink = if self.in_reasoning {
+                &mut reasoning
+            } else {
+                &mut normal
+            };
+            sink.push_str(&self.buffer[..pending]);
+            self.buffer.drain(..pending);
+            break;
+        }
+        ParserResult::new(normal, reasoning)
     }
 
     /// Check if the current buffer is a prefix of one of the tokens.
@@ -48,6 +147,12 @@ impl ReasoningParser for BaseReasoningParser {
         // Check input size against buffer limit
         if text.len() > self.config.max_buffer_size {
             return Err(ParseError::BufferOverflow(text.len()));
+        }
+
+        if !self.tool_starts.is_empty() {
+            self.buffer.clear();
+            self.buffer.push_str(text);
+            return Ok(self.drain_with_tool_starts(true));
         }
 
         let in_reasoning = self.in_reasoning || text.contains(&self.config.think_start_token);
@@ -85,6 +190,9 @@ impl ReasoningParser for BaseReasoningParser {
 
         // Incrementally parse the streaming text
         self.buffer.push_str(text);
+        if !self.tool_starts.is_empty() {
+            return Ok(self.drain_with_tool_starts(false));
+        }
         let mut current_text = self.buffer.clone();
 
         // If the current text is a prefix of a token, keep buffering
@@ -144,6 +252,9 @@ impl ReasoningParser for BaseReasoningParser {
     }
 
     fn flush(&mut self) -> Result<ParserResult, ParseError> {
+        if !self.tool_starts.is_empty() {
+            return Ok(self.drain_with_tool_starts(true));
+        }
         let text = std::mem::take(&mut self.buffer);
         Ok(if self.in_reasoning {
             ParserResult::reasoning(text)
@@ -156,6 +267,7 @@ impl ReasoningParser for BaseReasoningParser {
         self.in_reasoning = self.config.always_in_reasoning;
         self.buffer.clear();
         self.stripped_think_start = false;
+        self.tool_started = false;
     }
 
     fn mark_reasoning_started(&mut self) {

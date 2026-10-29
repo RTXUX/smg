@@ -54,6 +54,7 @@ from smg_grpc_servicer.vllm.launcher_switch import install_launcher_switch
 from smg_grpc_servicer.vllm.loads import LoadTracker, load_record, scheduler_load_fields
 from smg_grpc_servicer.vllm.media_identity import build_media_identity, media_identity_supported
 from smg_grpc_servicer.vllm.media_refs import parse_media_refs, validate_schemes
+from smg_grpc_servicer.vllm.metrics import get_metrics
 from smg_grpc_servicer.vllm.mm_processor import (
     ENV_PROCESSOR,
     PROCESSOR_FLAG,
@@ -768,6 +769,13 @@ class VllmEngineServicer(vllm_engine_pb2_grpc.VllmEngineServicer):
             info.engine_reasoning_parser = engine_reasoning_parser(self.engine.vllm_config)
             info.constrained_decoding_start = constrained_decoding_start(self.engine.vllm_config)
         return info
+
+    async def GetMetrics(
+        self,
+        request: common_pb2.GetMetricsRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> common_pb2.GetMetricsResponse:
+        return await get_metrics()
 
     async def GetLoads(
         self,

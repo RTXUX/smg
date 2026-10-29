@@ -204,6 +204,14 @@ fn produce_after(tx: GenerateTx, delay: Duration) {
 impl proto::vllm_engine_server::VllmEngine for Engine {
     type GenerateStream = ReceiverStream<Result<proto::GenerateResponse, Status>>;
 
+    async fn get_metrics(
+        &self,
+        _request: tonic::Request<smg_grpc_client::common_proto::GetMetricsRequest>,
+    ) -> Result<tonic::Response<smg_grpc_client::common_proto::GetMetricsResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("metrics"))
+    }
+
     async fn generate(
         &self,
         _request: Request<proto::GenerateRequest>,

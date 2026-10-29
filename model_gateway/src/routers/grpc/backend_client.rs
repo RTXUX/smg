@@ -201,6 +201,15 @@ impl BackendClient {
         }
     }
 
+    pub async fn get_metrics(&self) -> Result<String, tonic::Status> {
+        match self {
+            Self::Grpc(client) => client.get_metrics().await,
+            Self::Zmq(_) => Err(tonic::Status::unimplemented(
+                "GetMetrics is not supported over ZMQ",
+            )),
+        }
+    }
+
     pub async fn flush_cache(
         &self,
         timeout_s: f32,

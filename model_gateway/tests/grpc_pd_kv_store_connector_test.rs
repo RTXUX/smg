@@ -107,6 +107,14 @@ impl proto::vllm_engine_server::VllmEngine for RecordingEngine {
         clippy::expect_used,
         reason = "test mock - panicking on failure is intentional"
     )]
+    async fn get_metrics(
+        &self,
+        _request: tonic::Request<smg_grpc_client::common_proto::GetMetricsRequest>,
+    ) -> Result<tonic::Response<smg_grpc_client::common_proto::GetMetricsResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("metrics"))
+    }
+
     async fn generate(
         &self,
         request: Request<proto::GenerateRequest>,

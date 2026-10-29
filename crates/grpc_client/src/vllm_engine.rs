@@ -96,6 +96,15 @@ impl VllmEngineClient {
     crate::impl_get_tokenizer!();
     crate::impl_subscribe_kv_events!();
 
+    /// Scrape the worker's native Prometheus registry without resetting it.
+    pub async fn get_metrics(&self) -> Result<String, tonic::Status> {
+        let mut client = self.client.clone();
+        let mut request = Request::new(crate::common_proto::GetMetricsRequest {});
+        request.set_timeout(std::time::Duration::from_secs(5));
+        let response = client.get_metrics(request).await?;
+        Ok(response.into_inner().prometheus_text)
+    }
+
     /// Get load metrics from the vLLM engine.
     pub async fn get_loads(
         &self,

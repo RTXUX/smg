@@ -72,6 +72,14 @@ impl proto::vllm_engine_server::VllmEngine for SnapshotEngine {
     type GetTokenizerStream = ServerStream<common::GetTokenizerChunk>;
     type SubscribeKvEventsStream = ServerStream<common::KvEventBatch>;
 
+    async fn get_metrics(
+        &self,
+        _request: tonic::Request<smg_grpc_client::common_proto::GetMetricsRequest>,
+    ) -> Result<tonic::Response<smg_grpc_client::common_proto::GetMetricsResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("metrics"))
+    }
+
     async fn generate(
         &self,
         _request: Request<proto::GenerateRequest>,

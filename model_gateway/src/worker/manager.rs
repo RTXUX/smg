@@ -51,52 +51,6 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONCURRENT: usize = 32;
 const MAX_CONCURRENT_HEALTH_PROBES: usize = 128;
 
-/// Result of a fan-out request to a single worker
-struct WorkerResponse {
-    url: String,
-    result: Result<reqwest::Response, reqwest::Error>,
-}
-
-/// Fan out requests to workers in parallel
-///
-/// Requests are addressed to `worker.base_url()`, so under `--dp-aware`
-/// every rank of the same base worker targets the rank-free endpoint —
-/// `worker.url()` carries an `@{dp_rank}` suffix that is SMG-internal and
-/// not a valid server address (#1993). Callers that want one request per
-/// base worker must dedupe by base URL first (see `get_engine_metrics`).
-async fn fan_out(
-    workers: &[Arc<dyn Worker>],
-    endpoint: &str,
-    method: reqwest::Method,
-) -> Vec<WorkerResponse> {
-    let futures: Vec<_> = workers
-        .iter()
-        .map(|worker| {
-            let client = worker.http_client().clone();
-            let url = worker.base_url().to_string();
-            let full_url = format!("{url}/{endpoint}");
-            let api_key = worker.api_key().cloned();
-            let method = method.clone();
-
-            async move {
-                let mut req = client.request(method, &full_url).timeout(REQUEST_TIMEOUT);
-                if let Some(key) = api_key {
-                    req = req.bearer_auth(key);
-                }
-                WorkerResponse {
-                    url,
-                    result: req.send().await,
-                }
-            }
-        })
-        .collect();
-
-    stream::iter(futures)
-        .buffer_unordered(MAX_CONCURRENT)
-        .collect()
-        .await
-}
-
 pub enum EngineMetricsResult {
     Ok(String),
     Err(String),
@@ -105,7 +59,14 @@ pub enum EngineMetricsResult {
 impl IntoResponse for EngineMetricsResult {
     fn into_response(self) -> Response {
         match self {
-            Self::Ok(text) => (StatusCode::OK, text).into_response(),
+            Self::Ok(text) => (
+                [(
+                    http::header::CONTENT_TYPE,
+                    "text/plain; version=0.0.4; charset=utf-8",
+                )],
+                text,
+            )
+                .into_response(),
             Self::Err(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response(),
         }
     }
@@ -1307,19 +1268,69 @@ impl WorkerManager {
             .filter(|w| seen.insert(w.base_url().to_string()))
             .collect();
 
-        let responses = fan_out(&workers, "metrics", reqwest::Method::GET).await;
+        // Scrape on demand over the registered transport. The deadline covers
+        // acquiring a client and reading the whole response, not just headers.
+        let scrapes: Vec<_> = workers
+            .into_iter()
+            .map(|worker| async move {
+                let scrape = async {
+                    match worker.connection_mode() {
+                        ConnectionMode::Http => {
+                            let mut request = worker
+                                .http_client()
+                                .get(format!("{}/metrics", worker.base_url()));
+                            if let Some(key) = worker.api_key() {
+                                request = request.bearer_auth(key);
+                            }
+                            request
+                                .send()
+                                .await
+                                .map_err(|e| e.to_string())?
+                                .error_for_status()
+                                .map_err(|e| e.to_string())?
+                                .text()
+                                .await
+                                .map_err(|e| e.to_string())
+                        }
+                        ConnectionMode::Grpc | ConnectionMode::Zmq => {
+                            let client = worker
+                                .get_backend_client()
+                                .await
+                                .map_err(|e| e.to_string())?
+                                .ok_or_else(|| "Worker has no engine client".to_string())?;
+                            client.get_metrics().await.map_err(|e| e.to_string())
+                        }
+                    }
+                };
+                let result = tokio::time::timeout(REQUEST_TIMEOUT, scrape)
+                    .await
+                    .unwrap_or_else(|_| Err("Engine metrics scrape timed out".to_string()));
+                (worker.base_url().to_string(), result)
+            })
+            .collect();
+        let responses = stream::iter(scrapes)
+            .buffer_unordered(MAX_CONCURRENT)
+            .collect::<Vec<_>>()
+            .await;
 
         let mut metric_packs = Vec::new();
-        for resp in responses {
-            if let Ok(r) = resp.result {
-                if r.status().is_success() {
-                    if let Ok(text) = r.text().await {
-                        metric_packs.push(MetricPack {
-                            labels: vec![("worker_addr".into(), resp.url)],
-                            metrics_text: text,
-                        });
-                    }
-                }
+        let mut scrape_status = Vec::new();
+        for (url, result) in responses {
+            let success = u8::from(result.is_ok());
+            scrape_status.push(MetricPack {
+                labels: vec![("worker_addr".into(), url.clone())],
+                metrics_text: format!(
+                    "# HELP smg_engine_metrics_scrape_success Whether the engine metrics request succeeded.\n\
+                     # TYPE smg_engine_metrics_scrape_success gauge\n\
+                     smg_engine_metrics_scrape_success {success}\n"
+                ),
+            });
+            match result {
+                Ok(metrics_text) => metric_packs.push(MetricPack {
+                    labels: vec![("worker_addr".into(), url)],
+                    metrics_text,
+                }),
+                Err(error) => debug!(worker = %url, %error, "Engine metrics scrape failed"),
             }
         }
 
@@ -1327,6 +1338,7 @@ impl WorkerManager {
             return EngineMetricsResult::Err("All backend requests failed".to_string());
         }
 
+        metric_packs.extend(scrape_status);
         match metrics_aggregator::aggregate_metrics(metric_packs) {
             Ok(text) => EngineMetricsResult::Ok(text),
             Err(e) => EngineMetricsResult::Err(format!("Failed to aggregate metrics: {e}")),

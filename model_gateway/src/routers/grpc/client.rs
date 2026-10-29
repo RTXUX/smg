@@ -62,6 +62,15 @@ pub struct GenerateRequestBuildOptions {
 }
 
 impl GrpcClient {
+    pub async fn get_metrics(&self) -> Result<String, tonic::Status> {
+        match self {
+            Self::Vllm(client) => client.get_metrics().await,
+            _ => Err(tonic::Status::unimplemented(
+                "GetMetrics is not supported by this engine",
+            )),
+        }
+    }
+
     #[expect(
         clippy::panic,
         reason = "typed accessor: caller guarantees variant via is_sglang() check"

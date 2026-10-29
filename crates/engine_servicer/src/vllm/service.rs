@@ -91,6 +91,15 @@ impl VllmEngine for VllmEngineService {
         info::loads(&self.state).map(Response::new)
     }
 
+    async fn get_metrics(
+        &self,
+        _request: Request<common::GetMetricsRequest>,
+    ) -> Result<Response<common::GetMetricsResponse>, Status> {
+        Err(Status::unimplemented(
+            "native metrics are not implemented yet",
+        ))
+    }
+
     async fn get_tokenizer(
         &self,
         _request: Request<common::GetTokenizerRequest>,

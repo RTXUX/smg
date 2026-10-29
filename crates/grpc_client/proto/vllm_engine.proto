@@ -34,6 +34,9 @@ service VllmEngine {
   // while those records flow.
   rpc GetLoads(GetLoadsRequest) returns (GetLoadsResponse);
 
+  // Native engine metrics, collected on demand by the gateway's /engine_metrics.
+  rpc GetMetrics(smg.grpc.common.GetMetricsRequest) returns (smg.grpc.common.GetMetricsResponse);
+
   // Get tokenizer artifacts for remote construction
   rpc GetTokenizer(smg.grpc.common.GetTokenizerRequest) returns (stream smg.grpc.common.GetTokenizerChunk);
 

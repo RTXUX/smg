@@ -36,6 +36,33 @@ pip install smg-grpc-servicer[sglang]
 vllm serve meta-llama/Llama-2-7b-hf --grpc
 ```
 
+#### Engine metrics over gRPC
+
+SMG's `GET /engine_metrics` on the gateway API port scrapes vLLM gRPC
+workers through `VllmEngine/GetMetrics`. No worker HTTP listener is needed.
+The Python servicer exports the same Prometheus registry as vLLM's HTTP
+server, including its multiprocess registry when configured. Keep vLLM
+statistics enabled (omit `--disable-log-stats`). Install `smg-grpc-proto>=0.4.29`
+on the worker together with this servicer.
+
+```bash
+curl http://localhost:30000/engine_metrics
+grpcurl -plaintext -d '{}' localhost:50051 vllm.grpc.engine.VllmEngine/GetMetrics
+```
+
+Each scrape collects every base worker once, preserving native metric names,
+labels and cumulative histogram/counter values and adding `worker_addr`.
+HTTP workers continue to use their `/metrics` endpoint. Collection has a
+five-second deadline per worker and bounded concurrency. A failed or older
+worker with no `GetMetrics` is omitted, with
+`smg_engine_metrics_scrape_success{worker_addr="..."} 0` alongside successful
+workers. If all worker requests fail, the gateway returns HTTP 500 as before.
+Metrics collection does not change worker health or routing eligibility.
+This endpoint is separate from the gateway's `/metrics` listener and its
+lightweight `smg_engine_*` load gauges. When scraping several gateway replicas,
+deduplicate worker series or designate one collector to avoid counting each
+worker repeatedly.
+
 #### Numeric request priority
 
 Send `x-dynamo-request-priority: 10` to SMG to pass numeric priority to vLLM.

@@ -1,6 +1,15 @@
 syntax = "proto3";
 package smg.grpc.common;
 
+// A scrape-time snapshot, independent of the lightweight routing load report.
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+  // Prometheus text exposition 0.0.4 (UTF-8). Counters and histogram buckets
+  // are cumulative and owned by the worker; collecting never resets them.
+  string prometheus_text = 1;
+}
+
 // =====================
 // Tokenizer
 // =====================

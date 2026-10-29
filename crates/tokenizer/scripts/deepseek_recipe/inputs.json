@@ -1,6 +1,6 @@
 {
   "source": "deepseek-recipe",
-  "revision": "935817c66f5d6e64838f419692545f06787e485f",
+  "revision": "3c63f864a2e3b9b564e3de8a6ff409cea6be9933",
   "image_token": "<｜deepseek_image｜>",
   "cases": [
     {
@@ -129,7 +129,7 @@
       ]
     },
     {
-      "name": "history_drops_thinking",
+      "name": "history_retains_thinking",
       "messages": [
         {
           "role": "user",
@@ -681,6 +681,54 @@
         {
           "role": "user",
           "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "history_drops_thinking",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "a",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "drop_thinking": true
+    },
+    {
+      "name": "raw_tool_arguments",
+      "messages": [
+        {
+          "role": "user",
+          "content": "call f"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "Call the tool.",
+          "tool_calls": [
+            {
+              "id": "c1",
+              "type": "function",
+              "function": {
+                "name": "f",
+                "arguments": "{\"compact\":[1,2,3],\"nested\":{ \"n\":1e+00, \"s\":\"\\u0061\" },\"text\":\"a\\nb\",\"negative\":-0.00,\"huge\":123456789012345678901234567890}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c1",
+          "content": "done"
         }
       ]
     }

@@ -93,8 +93,11 @@ fn main() {
         ..Default::default()
     });
     let tokenizer = tokenizers::Tokenizer::from_file(&args[3]).unwrap();
-    let encoder = encoder.with_tokenizer(PromptTokenizer::new(&tokenizer));
+    let encoder = encoder
+        .with_tokenizer(PromptTokenizer::new(&tokenizer))
+        .with_preserved_tool_argument_spelling(true);
     for case in input["cases"].as_array_mut().unwrap() {
+        let encoder = encoder.clone().with_drop_thinking(case["drop_thinking"].as_bool().unwrap_or(false));
         let conversation = Conversation {
             messages: case["messages"]
                 .as_array()

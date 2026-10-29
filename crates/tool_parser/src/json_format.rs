@@ -1,20 +1,17 @@
-//! Serialize a [`serde_json::Value`] like Python's `json.dumps(value, ensure_ascii=False)`:
+//! Serialize a JSON value like Python's `json.dumps(value, ensure_ascii=False)`:
 //! spaced `", "` / `": "` separators, single line, raw UTF-8.
 //!
 //! serde_json only ships compact (`{"a":1}`) and pretty (multi-line) formatters,
 //! neither of which matches `json.dumps`. The DeepSeek-V4.1 reference parser
 //! (and the serving engines' Python parsers) hand tool-call `arguments` back as `json.dumps`
-//! output, so a compact string would differ byte-for-byte from theirs. This is
+//! output. Raw JSON fragments retain their original spelling. This is
 //! the same formatter `llm-tokenizer` uses for prompt rendering (`json_dumps.rs`),
 //! duplicated here so the parser crate does not pull in the tokenizer crate.
 
 use std::io;
 
 use serde::Serialize;
-use serde_json::{
-    ser::{Formatter, Serializer},
-    Value,
-};
+use serde_json::ser::{Formatter, Serializer};
 
 /// `serde_json` formatter that adds Python `json.dumps` default separator spacing.
 struct PythonDefaultFormatter;
@@ -50,7 +47,7 @@ impl Formatter for PythonDefaultFormatter {
 }
 
 /// Serialize `value` like `json.dumps(value, ensure_ascii=False)`.
-pub(crate) fn to_string(value: &Value) -> String {
+pub(crate) fn to_string(value: &impl Serialize) -> String {
     let mut buf = Vec::new();
     let mut ser = Serializer::with_formatter(&mut buf, PythonDefaultFormatter);
     if value.serialize(&mut ser).is_err() {

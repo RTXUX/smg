@@ -430,3 +430,26 @@ fn factory_constraint(tools: &[Tool]) -> String {
     );
     constraint.to_tuple().1
 }
+
+#[tokio::test]
+async fn raw_json_parameter_spelling_survives_every_chunk_size() {
+    let body = concat!(
+        "<｜DSML｜ parameter name=\"compact\" string=\"false\">[1,2,3]</｜DSML｜ parameter>\n",
+        "<｜DSML｜ parameter name=\"nested\" string=\"false\">{ \"n\":1e+00, \"s\":\"\\u0061\" }</｜DSML｜ parameter>\n",
+        "<｜DSML｜ parameter name=\"negative\" string=\"false\">-0.00</｜DSML｜ parameter>\n",
+        "<｜DSML｜ parameter name=\"large\" string=\"false\">123456789012345678901234567890</｜DSML｜ parameter>\n",
+        "<｜DSML｜ parameter name=\"exponent\" string=\"false\">1e+00</｜DSML｜ parameter>\n",
+        "<｜DSML｜ parameter name=\"text\" string=\"true\">a\nb</｜DSML｜ parameter>\n",
+    );
+    let output = format!("\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"f\">\n{body}</｜DSML｜ invoke>\n</｜DSML｜ calls>");
+    let expected = r#"{"compact": [1,2,3], "nested": { "n":1e+00, "s":"\u0061" }, "negative": -0.00, "large": 123456789012345678901234567890, "exponent": 1e+00, "text": "a\nb"}"#;
+    let (_, calls) = DeepSeekDsmlParser::v41()
+        .parse_complete(&output)
+        .await
+        .unwrap();
+    assert_eq!(calls[0].function.arguments, expected);
+    for size in 1..=output.chars().count() {
+        let (_, calls) = stream(&output, size).await;
+        assert_eq!(calls[0].1, expected, "chunk size {size}");
+    }
+}

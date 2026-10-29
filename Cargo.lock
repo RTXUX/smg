@@ -3980,6 +3980,7 @@ dependencies = [
  "dashmap",
  "foldhash 0.2.0",
  "hf-hub",
+ "indexmap 2.14.2",
  "minijinja",
  "minijinja-contrib",
  "openai-protocol",
@@ -9040,6 +9041,7 @@ name = "tool-parser"
 version = "1.10.1"
 dependencies = [
  "async-trait",
+ "indexmap 2.14.2",
  "num-traits",
  "openai-protocol",
  "parking_lot",

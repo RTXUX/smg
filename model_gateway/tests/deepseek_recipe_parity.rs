@@ -47,9 +47,8 @@ fn chat_requests_render_like_the_recipe() {
         ) {
             continue;
         }
-        // The pinned recipe defaults to pruning; SMG defaults to retention.
         let mut body = json!({"model":"deepseek-v4.1-flash", "messages":case["messages"],
-            "chat_template_kwargs":{"drop_thinking":true},
+            "chat_template_kwargs":{"drop_thinking":case["drop_thinking"].as_bool().unwrap_or(false)},
             "thinking":{"type":if case["thinking"] == false {"disabled"} else {"enabled"}}});
         for (from, to) in [
             ("effort", "reasoning_effort"),
@@ -91,7 +90,7 @@ fn chat_requests_render_like_the_recipe() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 29);
+    assert_eq!(checked, 31);
 }
 
 #[test]
@@ -161,4 +160,68 @@ fn chat_history_retention_can_be_explicitly_disabled() {
             drop != Some(true)
         );
     }
+}
+
+#[tokio::test]
+#[expect(
+    clippy::print_stderr,
+    reason = "diagnose optional production tokenizer fixture"
+)]
+async fn parsed_tool_history_preserves_the_generated_token_prefix() {
+    use llm_tokenizer::{Encoder, PromptEncoding};
+    use tool_parser::{parsers::DeepSeekDsmlParser, ToolParser};
+
+    let directory = std::env::var_os("DEEPSEEK_V41_MODEL_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../crates/tokenizer/.tokenizer_cache/deepseek_v41")
+        });
+    let path = directory.join("tokenizer.json");
+    if !path.exists() {
+        eprintln!("skipping prefix token check: set DEEPSEEK_V41_MODEL_DIR");
+        return;
+    }
+    let tokenizer = HuggingFaceTokenizer::from_file(path.to_str().unwrap()).unwrap();
+    let mut body = json!({"model":"deepseek-v4.1-flash", "thinking":{"type":"enabled"},
+        "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}],
+        "messages":[{"role":"user","content":"call f"}]});
+    let request: ChatCompletionRequest = serde_json::from_value(body.clone()).unwrap();
+    let (initial, encoding) =
+        process_chat_messages_with_encoding(&request, &tokenizer, None).unwrap();
+    let mut expected = match encoding {
+        PromptEncoding::Deferred(job) => job.run().unwrap(),
+        PromptEncoding::FromText => tokenizer.encode(&initial.text, false).unwrap(),
+    }
+    .token_ids()
+    .to_vec();
+    let calls = concat!(
+        "\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"f\">\n",
+        "<｜DSML｜ parameter name=\"compact\" string=\"false\">[1,2,3]</｜DSML｜ parameter>\n",
+        "<｜DSML｜ parameter name=\"nested\" string=\"false\">{ \"n\":1e+00, \"s\":\"\\u0061\" }</｜DSML｜ parameter>\n",
+        "<｜DSML｜ parameter name=\"number\" string=\"false\">-0.00</｜DSML｜ parameter>\n",
+        "</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+    );
+    let generated = format!("Call the tool.</think>{calls}<｜end▁of▁sentence｜>");
+    expected.extend_from_slice(tokenizer.encode(&generated, false).unwrap().token_ids());
+    let (_, parsed) = DeepSeekDsmlParser::v41()
+        .parse_complete(calls)
+        .await
+        .unwrap();
+    body["messages"].as_array_mut().unwrap().extend([
+        json!({"role":"assistant","content":"","reasoning_content":"Call the tool.",
+            "tool_calls":[{"type":"function","id":"c1","function":parsed[0].function}]}),
+        json!({"role":"tool","tool_call_id":"c1","content":"done"}),
+    ]);
+    let replay: ChatCompletionRequest = serde_json::from_value(body).unwrap();
+    let (rendered, encoding) =
+        process_chat_messages_with_encoding(&replay, &tokenizer, None).unwrap();
+    assert!(rendered
+        .text
+        .starts_with(&format!("{}{generated}", initial.text)));
+    let replay_ids = match encoding {
+        PromptEncoding::Deferred(job) => job.run().unwrap(),
+        PromptEncoding::FromText => tokenizer.encode(&rendered.text, false).unwrap(),
+    };
+    assert_eq!(&replay_ids.token_ids()[..expected.len()], expected);
 }

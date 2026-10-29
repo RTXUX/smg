@@ -1,9 +1,14 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use indexmap::IndexMap;
 use openai_protocol::common::Tool;
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{
+    json,
+    value::{to_raw_value, RawValue},
+    Value,
+};
 
 use crate::{
     errors::{ParserError, ParserResult},
@@ -313,9 +318,9 @@ impl DeepSeekDsmlParser {
     }
 
     /// Serialise an arguments object the way this dialect's reference does:
-    /// Python `json.dumps` spacing for V4.1, compact JSON for V3.2/V4.
-    fn dump_arguments(&self, params: serde_json::Map<String, Value>) -> String {
-        let value = Value::Object(params);
+    /// V4.1 spaces the outer object but preserves raw parameter JSON;
+    /// V3.2/V4 use compact JSON throughout.
+    fn dump_arguments(&self, value: IndexMap<String, Box<RawValue>>) -> String {
         if self.dialect.is_v41() {
             json_format::to_string(&value)
         } else {
@@ -373,7 +378,7 @@ impl DeepSeekDsmlParser {
         }
 
         // XML parameter path
-        let mut params = serde_json::Map::new();
+        let mut params = IndexMap::new();
 
         for cap in self.parameter_complete_regex.captures_iter(invoke_content) {
             let name = cap.get(1).map_or("", |m| m.as_str());
@@ -385,14 +390,9 @@ impl DeepSeekDsmlParser {
             // `string="true"` is a JSON string as written; `string="false"` is
             // parsed JSON, and JSON that does not parse stays the raw string.
             // No schema-driven coercion (the reference parser has none).
-            let json_value = if is_string == "true" {
-                Value::String(value.to_string())
-            } else {
-                serde_json::from_str(value.trim())
-                    .unwrap_or_else(|_| Value::String(value.to_string()))
-            };
-
-            params.insert(name.to_string(), json_value);
+            if let Some(json_value) = self.parameter_value(&value, is_string == "true", false) {
+                params.insert(name.to_string(), json_value);
+            }
         }
 
         // Partial parameter matching for streaming
@@ -428,11 +428,7 @@ impl DeepSeekDsmlParser {
                 // with a quote the finished array never has, corrupting every
                 // later delta.
                 if !value.is_empty() && !params.contains_key(name) {
-                    let json_value = if is_string == "true" {
-                        Some(Value::String(value.clone()))
-                    } else {
-                        serde_json::from_str(value.trim()).ok()
-                    };
+                    let json_value = self.parameter_value(&value, is_string == "true", true);
                     if let Some(json_value) = json_value {
                         params.insert(name.to_string(), json_value);
                     }
@@ -441,6 +437,24 @@ impl DeepSeekDsmlParser {
         }
 
         self.dump_arguments(params)
+    }
+
+    /// Preserve V4.1's generated JSON bytes, including exponent spelling and
+    /// nested whitespace. Earlier dialects retain their canonical JSON output.
+    fn parameter_value(&self, value: &str, string: bool, partial: bool) -> Option<Box<RawValue>> {
+        if !string {
+            let parsed = if self.dialect.is_v41() {
+                serde_json::from_str(value)
+            } else {
+                serde_json::from_str::<Value>(value).and_then(|value| to_raw_value(&value))
+            };
+            match parsed {
+                Ok(value) => return Some(value),
+                Err(_) if partial => return None,
+                Err(_) => {}
+            }
+        }
+        Some(to_raw_value(value).unwrap_or_else(|_| RawValue::NULL.to_owned()))
     }
 
     /// Parse a single complete invoke block into a ToolCall

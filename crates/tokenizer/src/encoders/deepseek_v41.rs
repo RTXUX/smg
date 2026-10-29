@@ -1,10 +1,14 @@
 // DeepSeek V4.1 prompt encoding, aligned with deepseek-recipe at
-// 935817c66f5d6e64838f419692545f06787e485f. See scripts/deepseek_recipe
+// 3c63f864a2e3b9b564e3de8a6ff409cea6be9933. See scripts/deepseek_recipe
 // for the independent oracle, provenance, and upstream MIT license.
 
 use std::collections::HashMap;
 
-use serde_json::Value;
+use indexmap::IndexMap;
+use serde_json::{
+    value::{to_raw_value, RawValue},
+    Value,
+};
 
 // `DsEncodingError` lives in `deepseek_common` (shared with V4); re-exported
 // here because it is part of this module's public API, and `pub(super)` items
@@ -292,17 +296,22 @@ fn write_recipe_arguments(prompt: &mut Prompt, arguments: &Value) {
         .as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| to_json(arguments));
+    // Keep each JSON value's original bytes: spacing, escapes and numeric
+    // spelling belong to the generated history and affect the cached prefix.
     let parsed =
-        serde_json::from_str::<serde_json::Map<String, Value>>(&original).unwrap_or_else(|_| {
-            serde_json::Map::from_iter([("arguments".into(), Value::String(original))])
+        serde_json::from_str::<IndexMap<String, Box<RawValue>>>(&original).unwrap_or_else(|_| {
+            IndexMap::from_iter([(
+                "arguments".into(),
+                to_raw_value(&original).unwrap_or_else(|_| RawValue::NULL.to_owned()),
+            )])
         });
     for (index, (name, value)) in parsed.iter().enumerate() {
         if index > 0 {
             prompt.push_plain("\n");
         }
-        let (is_string, value) = match value {
-            Value::String(text) => ("true", text.clone()),
-            value => ("false", to_json(value)),
+        let (is_string, value) = match serde_json::from_str::<String>(value.get()) {
+            Ok(text) => ("true", text),
+            Err(_) => ("false", value.get().to_owned()),
         };
         prompt.push_plain("<");
         prompt.push_special(DSML_TOKEN);
@@ -629,12 +638,11 @@ mod tests {
         .unwrap();
         assert_eq!(
             fixture["revision"],
-            "935817c66f5d6e64838f419692545f06787e485f"
+            "3c63f864a2e3b9b564e3de8a6ff409cea6be9933"
         );
         for case in fixture["cases"].as_array().unwrap() {
             let params = EncodeParams {
-                // The pinned recipe predates SMG's history-retention default.
-                drop_thinking: true,
+                drop_thinking: case["drop_thinking"].as_bool().unwrap_or(false),
                 reasoning_effort: parse_reasoning_effort(&case["effort"]).unwrap(),
                 ..Default::default()
             };

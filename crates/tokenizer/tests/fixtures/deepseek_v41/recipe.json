@@ -1,6 +1,6 @@
 {
   "source": "deepseek-recipe",
-  "revision": "935817c66f5d6e64838f419692545f06787e485f",
+  "revision": "3c63f864a2e3b9b564e3de8a6ff409cea6be9933",
   "image_token": "<｜deepseek_image｜>",
   "cases": [
     {
@@ -561,6 +561,9 @@
         128803,
         20072,
         128804,
+        128821,
+        1129,
+        3241,
         128822,
         19995,
         1,
@@ -572,7 +575,7 @@
         128804,
         128821
       ],
-      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>question<｜Assistant｜></think>answer<｜end▁of▁sentence｜><｜System｜>New rules<｜User｜>next<｜Assistant｜><think>",
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>question<｜Assistant｜><think>old thought</think>answer<｜end▁of▁sentence｜><｜System｜>New rules<｜User｜>next<｜Assistant｜><think>",
       "special_ranges": [
         {
           "start": 0,
@@ -592,27 +595,31 @@
         },
         {
           "start": 171,
-          "end": 179
+          "end": 178
         },
         {
-          "start": 185,
-          "end": 212
+          "start": 189,
+          "end": 197
         },
         {
-          "start": 212,
-          "end": 226
+          "start": 203,
+          "end": 230
         },
         {
-          "start": 235,
-          "end": 247
+          "start": 230,
+          "end": 244
         },
         {
-          "start": 251,
-          "end": 268
+          "start": 253,
+          "end": 265
         },
         {
-          "start": 268,
-          "end": 275
+          "start": 269,
+          "end": 286
+        },
+        {
+          "start": 286,
+          "end": 293
         }
       ]
     },
@@ -664,6 +671,7 @@
         128803,
         20072,
         128804,
+        128821,
         128822,
         1,
         128803,
@@ -671,7 +679,7 @@
         128804,
         128821
       ],
-      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>question<｜Assistant｜></think><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>question<｜Assistant｜><think></think><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
       "special_ranges": [
         {
           "start": 0,
@@ -691,28 +699,32 @@
         },
         {
           "start": 171,
-          "end": 179
+          "end": 178
         },
         {
-          "start": 179,
-          "end": 206
+          "start": 178,
+          "end": 186
         },
         {
-          "start": 206,
-          "end": 218
+          "start": 186,
+          "end": 213
         },
         {
-          "start": 222,
-          "end": 239
+          "start": 213,
+          "end": 225
         },
         {
-          "start": 239,
+          "start": 229,
           "end": 246
+        },
+        {
+          "start": 246,
+          "end": 253
         }
       ]
     },
     {
-      "name": "history_drops_thinking",
+      "name": "history_retains_thinking",
       "messages": [
         {
           "role": "user",
@@ -759,6 +771,9 @@
         128803,
         83,
         128804,
+        128821,
+        1129,
+        3241,
         128822,
         67,
         1,
@@ -767,7 +782,7 @@
         128804,
         128821
       ],
-      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜></think>a<｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜><think>old thought</think>a<｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
       "special_ranges": [
         {
           "start": 0,
@@ -787,23 +802,27 @@
         },
         {
           "start": 164,
-          "end": 172
+          "end": 171
         },
         {
-          "start": 173,
-          "end": 200
+          "start": 182,
+          "end": 190
         },
         {
-          "start": 200,
-          "end": 212
+          "start": 191,
+          "end": 218
         },
         {
-          "start": 216,
-          "end": 233
+          "start": 218,
+          "end": 230
         },
         {
-          "start": 233,
-          "end": 240
+          "start": 234,
+          "end": 251
+        },
+        {
+          "start": 251,
+          "end": 258
         }
       ]
     },
@@ -1121,6 +1140,9 @@
         128803,
         83,
         128804,
+        128821,
+        1129,
+        3241,
         128822,
         67,
         1,
@@ -1129,7 +1151,7 @@
         128804,
         128821
       ],
-      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜></think>a<｜end▁of▁sentence｜><｜System｜>next<｜Assistant｜><think>",
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜><think>old thought</think>a<｜end▁of▁sentence｜><｜System｜>next<｜Assistant｜><think>",
       "special_ranges": [
         {
           "start": 0,
@@ -1149,23 +1171,27 @@
         },
         {
           "start": 164,
-          "end": 172
+          "end": 171
         },
         {
-          "start": 173,
-          "end": 200
+          "start": 182,
+          "end": 190
         },
         {
-          "start": 200,
-          "end": 214
+          "start": 191,
+          "end": 218
         },
         {
           "start": 218,
-          "end": 235
+          "end": 232
         },
         {
-          "start": 235,
-          "end": 242
+          "start": 236,
+          "end": 253
+        },
+        {
+          "start": 253,
+          "end": 260
         }
       ]
     },
@@ -1397,6 +1423,11 @@
         7398,
         28217,
         128804,
+        128821,
+        119734,
+        818,
+        37947,
+        32,
         128822,
         119734,
         2728,
@@ -1413,7 +1444,7 @@
         128804,
         128821
       ],
-      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>literal <think> <｜User｜> ｜DSML｜<｜Assistant｜></think>literal </think> <｜Assistant｜><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>literal <think> <｜User｜> ｜DSML｜<｜Assistant｜><think>literal <think></think>literal </think> <｜Assistant｜><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
       "special_ranges": [
         {
           "start": 0,
@@ -1433,23 +1464,27 @@
         },
         {
           "start": 202,
-          "end": 210
+          "end": 209
         },
         {
-          "start": 244,
-          "end": 271
+          "start": 224,
+          "end": 232
         },
         {
-          "start": 271,
-          "end": 283
+          "start": 266,
+          "end": 293
         },
         {
-          "start": 287,
-          "end": 304
+          "start": 293,
+          "end": 305
         },
         {
-          "start": 304,
-          "end": 311
+          "start": 309,
+          "end": 326
+        },
+        {
+          "start": 326,
+          "end": 333
         }
       ]
     },
@@ -1501,6 +1536,9 @@
         128803,
         4779,
         128804,
+        128821,
+        1129,
+        3241,
         128822,
         129278,
         10325,
@@ -1516,7 +1554,7 @@
         128804,
         128821
       ],
-      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>where<｜Assistant｜></think><｜ref｜>object<｜/ref｜><｜box｜>1,2<｜/box｜><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>where<｜Assistant｜><think>old thought</think><｜ref｜>object<｜/ref｜><｜box｜>1,2<｜/box｜><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
       "special_ranges": [
         {
           "start": 0,
@@ -1536,39 +1574,43 @@
         },
         {
           "start": 168,
-          "end": 176
+          "end": 175
         },
         {
-          "start": 176,
-          "end": 187
+          "start": 186,
+          "end": 194
         },
         {
-          "start": 193,
+          "start": 194,
           "end": 205
         },
         {
-          "start": 205,
-          "end": 216
+          "start": 211,
+          "end": 223
         },
         {
-          "start": 219,
-          "end": 231
+          "start": 223,
+          "end": 234
         },
         {
-          "start": 231,
-          "end": 258
+          "start": 237,
+          "end": 249
         },
         {
-          "start": 258,
-          "end": 270
+          "start": 249,
+          "end": 276
         },
         {
-          "start": 274,
-          "end": 291
+          "start": 276,
+          "end": 288
         },
         {
-          "start": 291,
-          "end": 298
+          "start": 292,
+          "end": 309
+        },
+        {
+          "start": 309,
+          "end": 316
         }
       ]
     },
@@ -5026,6 +5068,7 @@
         128803,
         83,
         128804,
+        128821,
         128822,
         67,
         271,
@@ -5036,7 +5079,108 @@
         128804,
         128821
       ],
-      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜></think>a\n\nb<｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜><think></think>a\n\nb<｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 164
+        },
+        {
+          "start": 164,
+          "end": 171
+        },
+        {
+          "start": 171,
+          "end": 179
+        },
+        {
+          "start": 183,
+          "end": 210
+        },
+        {
+          "start": 210,
+          "end": 222
+        },
+        {
+          "start": 226,
+          "end": 243
+        },
+        {
+          "start": 243,
+          "end": 250
+        }
+      ]
+    },
+    {
+      "name": "history_drops_thinking",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "a",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "drop_thinking": true,
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128804,
+        128822,
+        67,
+        1,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜></think>a<｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
       "special_ranges": [
         {
           "start": 0,
@@ -5059,20 +5203,338 @@
           "end": 172
         },
         {
-          "start": 176,
-          "end": 203
+          "start": 173,
+          "end": 200
         },
         {
-          "start": 203,
-          "end": 215
+          "start": 200,
+          "end": 212
         },
         {
-          "start": 219,
-          "end": 236
+          "start": 216,
+          "end": 233
         },
         {
-          "start": 236,
-          "end": 243
+          "start": 233,
+          "end": 240
+        }
+      ]
+    },
+    {
+      "name": "raw_tool_arguments",
+      "messages": [
+        {
+          "role": "user",
+          "content": "call f"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "Call the tool.",
+          "tool_calls": [
+            {
+              "id": "c1",
+              "type": "function",
+              "function": {
+                "name": "f",
+                "arguments": "{\"compact\":[1,2,3],\"nested\":{ \"n\":1e+00, \"s\":\"\\u0061\" },\"text\":\"a\\nb\",\"negative\":-0.00,\"huge\":123456789012345678901234567890}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c1",
+          "content": "done"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        26606,
+        285,
+        128804,
+        128821,
+        18520,
+        270,
+        4105,
+        16,
+        128822,
+        271,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        1281,
+        72,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        125164,
+        4,
+        3418,
+        1281,
+        19836,
+        3320,
+        61,
+        19,
+        14,
+        20,
+        14,
+        21,
+        63,
+        1718,
+        128825,
+        10767,
+        1018,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        80,
+        12904,
+        4,
+        3418,
+        1281,
+        19836,
+        84645,
+        582,
+        80,
+        3362,
+        19,
+        71,
+        13,
+        504,
+        14,
+        582,
+        85,
+        16562,
+        62,
+        87,
+        17031,
+        19,
+        4,
+        837,
+        1718,
+        128825,
+        10767,
+        1018,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        2067,
+        4,
+        3418,
+        1281,
+        11476,
+        3320,
+        67,
+        201,
+        68,
+        1718,
+        128825,
+        10767,
+        1018,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        29769,
+        4,
+        3418,
+        1281,
+        19836,
+        3320,
+        15,
+        18,
+        16,
+        504,
+        1718,
+        128825,
+        10767,
+        1018,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        74,
+        6743,
+        4,
+        3418,
+        1281,
+        19836,
+        3320,
+        6895,
+        18009,
+        25744,
+        16993,
+        18014,
+        27183,
+        25622,
+        14456,
+        25601,
+        27168,
+        1718,
+        128825,
+        10767,
+        1018,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        32,
+        1,
+        128803,
+        30,
+        72461,
+        46148,
+        32,
+        44629,
+        1718,
+        72461,
+        46148,
+        32,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>call f<｜Assistant｜><think>Call the tool.</think>\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"f\">\n<｜DSML｜ parameter name=\"compact\" string=\"false\">[1,2,3]</｜DSML｜ parameter>\n<｜DSML｜ parameter name=\"nested\" string=\"false\">{ \"n\":1e+00, \"s\":\"\\u0061\" }</｜DSML｜ parameter>\n<｜DSML｜ parameter name=\"text\" string=\"true\">a\nb</｜DSML｜ parameter>\n<｜DSML｜ parameter name=\"negative\" string=\"false\">-0.00</｜DSML｜ parameter>\n<｜DSML｜ parameter name=\"huge\" string=\"false\">123456789012345678901234567890</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls><｜end▁of▁sentence｜><｜User｜><tool_result>done</tool_result><｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 152,
+          "end": 169
+        },
+        {
+          "start": 169,
+          "end": 176
+        },
+        {
+          "start": 190,
+          "end": 198
+        },
+        {
+          "start": 201,
+          "end": 211
+        },
+        {
+          "start": 220,
+          "end": 230
+        },
+        {
+          "start": 249,
+          "end": 259
+        },
+        {
+          "start": 309,
+          "end": 319
+        },
+        {
+          "start": 332,
+          "end": 342
+        },
+        {
+          "start": 411,
+          "end": 421
+        },
+        {
+          "start": 434,
+          "end": 444
+        },
+        {
+          "start": 486,
+          "end": 496
+        },
+        {
+          "start": 509,
+          "end": 519
+        },
+        {
+          "start": 568,
+          "end": 578
+        },
+        {
+          "start": 591,
+          "end": 601
+        },
+        {
+          "start": 671,
+          "end": 681
+        },
+        {
+          "start": 695,
+          "end": 705
+        },
+        {
+          "start": 716,
+          "end": 726
+        },
+        {
+          "start": 733,
+          "end": 760
+        },
+        {
+          "start": 760,
+          "end": 772
+        },
+        {
+          "start": 803,
+          "end": 820
+        },
+        {
+          "start": 820,
+          "end": 827
         }
       ]
     }

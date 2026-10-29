@@ -2,7 +2,7 @@
 set -euo pipefail
 recipe_dir=$(realpath "${1:?usage: record.sh /path/to/deepseek-recipe [--check]}")
 fixture_dir=$(cd "$(dirname "$0")" && pwd)
-revision=935817c66f5d6e64838f419692545f06787e485f
+revision=3c63f864a2e3b9b564e3de8a6ff409cea6be9933
 test "$(git -C "$recipe_dir" rev-parse HEAD)" = "$revision"
 test -z "$(git -C "$recipe_dir" status --porcelain)"
 record_dir=$(mktemp -d)

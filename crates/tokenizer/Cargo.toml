@@ -21,11 +21,12 @@ name = "llm_tokenizer"
 tokenizers-v1 = ["dep:tokenizers-v1"]
 
 [dependencies]
+indexmap.workspace = true
 anyhow.workspace = true
 blake3.workspace = true
 dashmap.workspace = true
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros"] }
 tracing.workspace = true

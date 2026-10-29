@@ -67,6 +67,7 @@ rand = "0.10.1"
 reqwest = { version = "0.13.4", default-features = false }
 serde = { version = "1.0" }
 serde_json = { version = "1.0", features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
 serde_with = { version = "3", features = ["macros"] }
 subtle = "2.6"
 thiserror = "2.0.18"

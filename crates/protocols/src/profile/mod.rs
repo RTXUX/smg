@@ -14,7 +14,7 @@
 //! parts, such as MiniMax's `max_long_side_pixel` and `fps`, are not covered
 //! by that pass and are forwarded as sent.
 
-mod deepseek;
+pub mod deepseek;
 mod kimi;
 mod minimax;
 mod openai;

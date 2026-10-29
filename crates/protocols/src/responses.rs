@@ -1564,6 +1564,7 @@ pub enum ReasoningEffort {
     Medium,
     High,
     Xhigh,
+    #[serde(alias = "ultra")]
     Max,
 }
 
@@ -3146,6 +3147,10 @@ pub struct ResponsesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ResponseReasoningParam>,
 
+    /// Explicit thinking control, shared with Chat Completions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<crate::chat::ThinkingParam>,
+
     /// Service tier
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<ServiceTier>,
@@ -3291,6 +3296,7 @@ impl Default for ResponsesRequest {
             parallel_tool_calls: None,
             previous_response_id: None,
             reasoning: None,
+            thinking: None,
             service_tier: None,
             store: None,
             stream: None,

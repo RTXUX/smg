@@ -1,6 +1,5 @@
-//! Bounded DeepSeek V4 / V4.1 Chat dialect, calibrated by
-//! smg-project/deepseek-provider-verifier against deepseek-flash and deepseek-v4-pro.
-//! See https://api-docs.deepseek.com/api/create-chat-completion/.
+//! DeepSeek frontend controls: Dynamo V4 opt-in thinking and the V4.1 recipe.
+//! Explicit thinking controls and normalized effort are shared by rendering and parsing.
 //!
 //! Older V3/R1 models and opaque aliases retain the baseline. This profile
 //! does not claim the vendor's context window, sampling behavior or JSON
@@ -14,53 +13,171 @@ use crate::{
     common::{ToolChoice, ToolChoiceValue},
 };
 
-pub(super) fn matches_model(segment: &str) -> bool {
-    [
-        "deepseek-flash",
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
-        "deepseek-v4.1-flash",
-    ]
-    .iter()
-    .any(|model| segment.eq_ignore_ascii_case(model))
+/// Whether a model uses the V4.1 recipe, including its public Flash alias.
+pub fn is_v41_model(model: &str) -> bool {
+    model.split('/').any(|part| {
+        let part = part.to_ascii_lowercase();
+        [
+            "deepseek-v4.1",
+            "deepseek_v4.1",
+            "deepseek-v41",
+            "deepseek_v41",
+            "deepseekv41",
+            "deepseek_v4_1",
+            "deepseek-flash",
+            "deepseek_flash",
+        ]
+        .iter()
+        .any(|prefix| {
+            part.strip_prefix(prefix)
+                .is_some_and(|tail| tail.is_empty() || tail.starts_with(['-', '_']))
+        })
+    })
 }
 
-fn is_v41_model(model: &str) -> bool {
-    model
-        .split('/')
-        .any(|segment| segment.eq_ignore_ascii_case("deepseek-v4.1-flash"))
+pub(super) fn matches_model(segment: &str) -> bool {
+    is_v41_model(segment)
+        || ["deepseek-v4", "deepseek_v4", "deepseekv4"]
+            .iter()
+            .any(|prefix| {
+                segment
+                    .to_ascii_lowercase()
+                    .strip_prefix(prefix)
+                    .is_some_and(|tail| tail.is_empty() || tail.starts_with(['-', '_']))
+            })
+}
+
+/// The effort names passed to native renderers. V4.1 follows deepseek-recipe;
+/// numeric 1..=100 budgets remain a supported SMG extension.
+pub fn normalize_effort<'a>(model: &str, effort: &'a str) -> &'a str {
+    match effort {
+        "minimal" if is_v41_model(model) => "low",
+        "minimal" => "none",
+        "medium" => "high",
+        "xhigh" if !is_v41_model(model) => "max",
+        "ultra" => "max",
+        _ => effort,
+    }
+}
+
+/// Resolve protocol controls without template overrides (Messages and counts).
+pub fn thinking_enabled(model: &str, explicit: Option<bool>, effort: Option<&str>) -> bool {
+    if is_v41_model(model) {
+        explicit.unwrap_or_else(|| effort != Some("none"))
+    } else {
+        explicit != Some(false)
+            && !matches!(effort, Some("none" | "minimal"))
+            && (explicit == Some(true) || effort.is_some())
+    }
 }
 
 pub(super) fn normalize_chat(req: &mut ChatCompletionRequest) {
-    let is_v41 = is_v41_model(&req.model);
-    for effort in [
+    // Invalid override types must survive normalization for validation.
+    if req.chat_template_kwargs.as_ref().is_some_and(|kwargs| {
+        ["thinking", "enable_thinking"].iter().any(|key| {
+            kwargs
+                .get(*key)
+                .is_some_and(|value| !value.is_null() && !value.is_boolean())
+        })
+    }) {
+        return;
+    }
+    let explicit = req
+        .thinking
+        .as_ref()
+        .and_then(|thinking| thinking.r#type)
+        .map(|kind| kind != ThinkingType::Disabled);
+    let kwargs = req.chat_template_kwargs.as_ref();
+    let mode = kwargs
+        .and_then(|k| k.get("thinking_mode"))
+        .and_then(Value::as_str)
+        .and_then(|mode| match mode {
+            "enabled" | "thinking" | "adaptive" => Some(true),
+            "disabled" | "chat" => Some(false),
+            _ => None,
+        });
+    let toggle = |key| kwargs.and_then(|k| k.get(key)).and_then(Value::as_bool);
+    let effort = req
+        .effective_reasoning_effort()
+        .map(str::to_owned)
+        .or_else(|| {
+            kwargs.and_then(|k| k.get("reasoning_effort")).map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string())
+            })
+        });
+    let enabled = if is_v41_model(&req.model) {
+        thinking_enabled(
+            &req.model,
+            explicit
+                .or_else(|| toggle("thinking"))
+                .or_else(|| toggle("enable_thinking"))
+                .or(mode),
+            effort.as_deref(),
+        )
+    } else {
+        let disabled = [
+            explicit,
+            toggle("thinking"),
+            toggle("enable_thinking"),
+            mode,
+        ]
+        .contains(&Some(false));
+        thinking_enabled(
+            &req.model,
+            if disabled {
+                Some(false)
+            } else if [
+                explicit,
+                toggle("thinking"),
+                toggle("enable_thinking"),
+                mode,
+            ]
+            .contains(&Some(true))
+            {
+                Some(true)
+            } else {
+                None
+            },
+            effort.as_deref(),
+        )
+    };
+    for value in [
         req.reasoning_effort.as_mut(),
-        req.thinking
-            .as_mut()
-            .and_then(|thinking| thinking.effort.as_mut()),
+        req.thinking.as_mut().and_then(|t| t.effort.as_mut()),
     ]
     .into_iter()
     .flatten()
     {
-        match effort.as_str() {
-            "minimal" => *effort = "low".into(),
-            "medium" => *effort = "high".into(),
-            // V4.1 has its own native xhigh budget (75 rather than high's 50).
-            "xhigh" if !is_v41 => *effort = "high".into(),
-            _ => {}
+        *value = normalize_effort(&req.model, value).to_owned();
+        if enabled && value == "none" {
+            *value = "high".into();
         }
     }
-    // Native V4 and V4.1 renderers have different defaults and effort
-    // precedence. Resolve the provider contract once and pass the same
-    // highest-priority toggle to rendering, parser arming and validation.
-    let enabled = thinking_enabled(req);
+    let effort = effort
+        .as_deref()
+        .map(|effort| normalize_effort(&req.model, effort));
+    let effort = match effort {
+        None | Some("none") if enabled => Some("high"),
+        other => other,
+    };
     let kwargs = req.chat_template_kwargs.get_or_insert_default();
-    if kwargs.get("thinking").is_none_or(Value::is_null) {
-        kwargs.insert("thinking".into(), Value::Bool(enabled));
+    kwargs.insert("thinking".into(), Value::Bool(enabled));
+    kwargs.insert("enable_thinking".into(), Value::Bool(enabled));
+    kwargs.insert(
+        "thinking_mode".into(),
+        Value::String(if enabled { "enabled" } else { "disabled" }.into()),
+    );
+    if let Some(effort) = effort {
+        kwargs.insert("reasoning_effort".into(), Value::String(effort.into()));
     }
 }
 
-pub(super) fn validate_chat(req: &ChatCompletionRequest) -> Result<(), validator::ValidationError> {
+/// Validate normalized thinking controls without imposing Chat history rules
+/// on a Responses replay reconstructed by the gateway.
+pub fn validate_chat(req: &ChatCompletionRequest) -> Result<(), validator::ValidationError> {
     // Never let a malformed override block projection and make validation
     // disagree with a renderer that ignores that value.
     if let Some(kwargs) = &req.chat_template_kwargs {
@@ -86,16 +203,6 @@ pub(super) fn validate_chat(req: &ChatCompletionRequest) -> Result<(), validator
                 ));
             }
         }
-    }
-    if req
-        .thinking
-        .as_ref()
-        .is_some_and(|thinking| thinking.r#type == Some(ThinkingType::Adaptive))
-    {
-        return Err(error(
-            "thinking_type_not_supported",
-            "thinking.type must be enabled or disabled for DeepSeek V4",
-        ));
     }
     // Validate both spellings, including one hidden by the other's precedence.
     for effort in [
@@ -133,37 +240,25 @@ pub(super) fn validate_chat(req: &ChatCompletionRequest) -> Result<(), validator
         Some(ToolChoice::AllowedTools { mode, .. }) => mode == "required",
         _ => false,
     };
-    if thinking_enabled(req) && forced {
+    let enabled = req
+        .chat_template_kwargs
+        .as_ref()
+        .and_then(|kwargs| kwargs.get("thinking"))
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            thinking_enabled(
+                &req.model,
+                req.thinking_toggle(),
+                req.effective_reasoning_effort(),
+            )
+        });
+    if enabled && forced {
         return Err(error(
             "tool_choice_not_supported",
             "DeepSeek V4 requires thinking to be disabled for forced tool choice",
         ));
     }
     Ok(())
-}
-
-/// SMG template overrides stay explicit; public `thinking.type` then
-/// decides ahead of public effort, with thinking enabled by default.
-fn thinking_enabled(req: &ChatCompletionRequest) -> bool {
-    let kwargs = req.chat_template_kwargs.as_ref();
-    kwargs
-        .and_then(|kwargs| {
-            kwargs
-                .get("thinking")
-                .and_then(Value::as_bool)
-                .or_else(|| kwargs.get("enable_thinking").and_then(Value::as_bool))
-        })
-        .or_else(|| {
-            kwargs
-                .and_then(|kwargs| kwargs.get("reasoning_effort").and_then(Value::as_str))
-                .and_then(|effort| match effort {
-                    "none" | "minimal" => Some(false),
-                    "low" | "high" | "xhigh" | "max" => Some(true),
-                    _ => None,
-                })
-        })
-        .or_else(|| req.thinking_toggle())
-        .unwrap_or_else(|| req.effective_reasoning_effort() != Some("none"))
 }
 
 fn error(code: &'static str, message: &'static str) -> validator::ValidationError {

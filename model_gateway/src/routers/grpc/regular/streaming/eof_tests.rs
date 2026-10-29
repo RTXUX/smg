@@ -753,7 +753,7 @@ fn byte_fallback_messages_spec(thinking: bool) -> MessagesResponseSpec {
     MessagesResponseSpec {
         provider: ProviderProfile::Generic,
         thinking: thinking.then_some(messages::ThinkingConfig::Enabled {
-            budget_tokens: 1024,
+            budget_tokens: Some(1024),
             display: None,
         }),
         reasoning_in_prefill: None,
@@ -1846,7 +1846,7 @@ async fn messages_eof_emits_thinking_tail_before_block_stop() {
         let spec = MessagesResponseSpec {
             provider: ProviderProfile::Generic,
             thinking: Some(messages::ThinkingConfig::Enabled {
-                budget_tokens: 1024,
+                budget_tokens: Some(1024),
                 display: None,
             }),
             reasoning_in_prefill: None,
@@ -2314,7 +2314,7 @@ async fn messages_blocks_and_inputs(
     let spec = MessagesResponseSpec {
         provider: ProviderProfile::Generic,
         thinking: Some(messages::ThinkingConfig::Enabled {
-            budget_tokens: 1024,
+            budget_tokens: Some(1024),
             display: None,
         }),
         reasoning_in_prefill: None,

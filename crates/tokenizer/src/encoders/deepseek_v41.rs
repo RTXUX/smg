@@ -9,6 +9,8 @@
 // mid-conversation system messages count as user turns, and image content
 // parts collapse to [`IMAGE_PLACEHOLDER`].
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 // `DsEncodingError` lives in `deepseek_common` (shared with V4); re-exported
@@ -80,8 +82,7 @@ pub(crate) const PROFILE: RendererProfile = RendererProfile {
     thinking_toggle: ThinkingToggle::DefaultOn,
     thinking_key_name: ThinkingKeyName::Thinking,
     native_effort_values: NATIVE_EFFORT_VALUES,
-    // Switches off on the protocol's `none` / `minimal`: no words of its own.
-    native_effort_off_values: &[],
+    native_effort_off_values: &["none"],
     // `<｜Assistant｜><think>` ends the prompt when thinking is on.
     think_in_prefill: true,
     // The shim honours the engine's `enable_thinking` alias, renders a
@@ -94,8 +95,41 @@ pub(crate) const PROFILE: RendererProfile = RendererProfile {
         raw_tool_call_arguments: true,
         declares_tools_under_tool_choice_none: false,
     },
-    thinking_mode: None,
+    thinking_mode: Some(resolve_thinking),
 };
+
+/// The recipe's explicit thinking control outranks effort. Template aliases
+/// are supported for callers rendering a prompt without a protocol request.
+pub(crate) fn resolve_thinking(
+    kwargs: Option<&HashMap<String, Value>>,
+    thinking: Option<bool>,
+) -> bool {
+    thinking
+        .or_else(|| {
+            kwargs.and_then(|kwargs| {
+                kwargs
+                    .get("thinking")
+                    .and_then(Value::as_bool)
+                    .or_else(|| kwargs.get("enable_thinking").and_then(Value::as_bool))
+                    .or_else(|| {
+                        kwargs
+                            .get("thinking_mode")
+                            .and_then(Value::as_str)
+                            .and_then(|mode| match mode {
+                                "enabled" | "thinking" | "adaptive" => Some(true),
+                                "disabled" | "chat" => Some(false),
+                                _ => None,
+                            })
+                    })
+            })
+        })
+        .unwrap_or_else(|| {
+            kwargs
+                .and_then(|k| k.get("reasoning_effort"))
+                .and_then(Value::as_str)
+                != Some("none")
+        })
+}
 pub const REASONING_EFFORT_TEMPLATE: &str =
     "Reasoning Effort: {budget} (range 1-100, the higher the value, the more thorough the reasoning)\n\n";
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = ReasoningEffort::High;
@@ -127,10 +161,10 @@ impl ReasoningEffort {
     /// Parse one of [`NATIVE_EFFORT_VALUES`].
     fn from_native(value: &str) -> Option<Self> {
         match value {
-            "low" => Some(Self::Low),
-            "high" => Some(Self::High),
+            "minimal" | "low" => Some(Self::Low),
+            "medium" | "high" => Some(Self::High),
             "xhigh" => Some(Self::XHigh),
-            "max" => Some(Self::Max),
+            "ultra" | "max" => Some(Self::Max),
             _ => None,
         }
     }

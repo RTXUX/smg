@@ -1781,45 +1781,8 @@ fn restore_integer_reasoning_effort(value: &serde_json::Value) -> Option<serde_j
     digits.parse::<u64>().ok().map(serde_json::Value::from)
 }
 
-/// DeepSeek V4.1 chat-template shim. Order: attach tools to the first system
-/// message (the engine's rule) -> resolve `reasoning_effort` -> resolve the
-/// thinking mode -> `drop_thinking` -> stamp `wo_eos` on a trailing assistant
-/// message when `add_generation_prompt` is false -> encode.
-///
-/// `add_generation_prompt: false` with a trailing assistant message is the
-/// encoder's `wo_eos` route (no EOS, no generation header). The gateway sends
-/// it for `continue_final_message` with a trailing assistant turn because
-/// `renderer_capabilities().native_assistant_continuation` is declared, and
-/// does not arm the reasoning parser for that shape: the message is rendered
-/// past its `</think>`, so the completion starts in content mode.
-///
-/// The shim reads the merged template kwargs, so an explicit
-/// `chat_template_kwargs.reasoning_effort` wins over the projected top-level
-/// `reasoning_effort` (SMG's global contract; the engine prefers the top-level
-/// field — a divergence only on contradictory requests).
-///
-/// The thinking mode mirrors the gateway's parser-arming precedence
-/// (`resolve_thinking_pref` in `model_gateway/src/routers/grpc/utils/parsers.rs`)
-/// so the rendered prompt and the arming decision agree on every request
-/// shape:
-/// 1. an explicit `template_kwargs["thinking"]` boolean decides;
-/// 2. else the `reasoning_effort` kwarg: `"none"`/`"minimal"` (the gateway's
-///    thinking switch, `thinking_from_reasoning_effort`) switch thinking off,
-///    a native effort name (`low`/`high`/`xhigh`/`max`) switches it on, and
-///    an integer budget has no opinion;
-/// 3. else `params.thinking` (the gateway's projection of the typed
-///    `thinking.type` toggle, else `Some(false)` for a `none`/`minimal`
-///    effective `reasoning_effort`);
-/// 4. else on ([`ThinkingToggle::DefaultOn`]).
-///
-/// Deliberate divergence from the engine's Python renderer: there `reasoning_effort: "none"`
-/// forces chat mode even over an explicit `thinking: true`. Here the explicit
-/// toggle wins, because the gateway arms the reasoning parser from the
-/// explicit toggle first, and rendering chat mode for that contradictory input
-/// would have the armed parser swallow the whole answer as reasoning. Neither
-/// switch value reaches `parse_reasoning_effort` (which rejects both, as the
-/// reference does) and both leave the effort unset, so a thinking-mode prompt
-/// carries the default budget.
+/// DeepSeek V4.1 rendering. Explicit protocol thinking outranks template
+/// controls and effort; the same resolver arms the response parser.
 fn render_deepseek_v41(
     messages: &[serde_json::Value],
     params: &ChatTemplateParams,
@@ -1838,7 +1801,7 @@ fn render_deepseek_v41(
     let effort_name = effort_kwarg.and_then(serde_json::Value::as_str);
     // `"none"`/`"minimal"` are the gateway's thinking switch (both project to
     // thinking off everywhere else in SMG), not effort levels.
-    let effort_is_none = matches!(effort_name, Some("none") | Some("minimal"));
+    let effort_is_none = effort_name == Some("none");
     let reasoning_effort = if effort_is_none {
         None
     } else {
@@ -1851,20 +1814,9 @@ fn render_deepseek_v41(
             .map_err(|e| Error::msg(format!("DeepSeek V4.1 reasoning_effort invalid: {e}")))?
             .flatten()
     };
-    // The effort kwarg's opinion on the mode (step 2 above). Only the names
-    // advertised through `native_reasoning_effort_values()` switch thinking
-    // on: exactly the set the gateway treats as arming the parser.
-    let effort_mode = if effort_is_none {
-        Some(false)
-    } else {
-        effort_name
-            .is_some_and(|name| deepseek_v41::NATIVE_EFFORT_VALUES.contains(&name))
-            .then_some(true)
-    };
-    let thinking_on = explicit_thinking_v41(params)?
-        .or(effort_mode)
-        .or(params.thinking)
-        .unwrap_or(true);
+    // Validate override types even when a typed thinking control takes priority.
+    explicit_thinking_v41(params)?;
+    let thinking_on = deepseek_v41::resolve_thinking(params.template_kwargs, params.thinking);
     let thinking_mode = if thinking_on {
         deepseek_v32::ThinkingMode::Thinking
     } else {

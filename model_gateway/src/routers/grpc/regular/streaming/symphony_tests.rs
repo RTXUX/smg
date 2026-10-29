@@ -348,7 +348,7 @@ fn assigned_message(format: Format, prompt: &str, thinking: bool) -> MessagesRes
         reasoning_effort: None,
         first_tool_call_only: false,
         thinking: thinking.then_some(messages::ThinkingConfig::Enabled {
-            budget_tokens: 1024,
+            budget_tokens: Some(1024),
             display: None,
         }),
         reasoning_in_prefill: None,

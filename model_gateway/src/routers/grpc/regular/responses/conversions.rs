@@ -13,7 +13,7 @@ use openai_protocol::{
         ContentPart, FunctionCallResponse, ImageUrl, JsonSchemaFormat, ResponseFormat, ToolCall,
         ToolChoice, ToolChoiceValue, UsageInfo,
     },
-    profile::ProviderProfile,
+    profile::{deepseek, ProviderProfile},
     responses::{
         CustomToolCallOutputContent, CustomToolInputContentPart, IncludeField, IncompleteDetails,
         IncompleteReason, ResponseContentPart, ResponseInput, ResponseInputOutputItem,
@@ -21,6 +21,7 @@ use openai_protocol::{
         ResponsesRequest, ResponsesResponse, ResponsesUsage, StringOrContentParts, TextConfig,
         TextFormat,
     },
+    validated::Normalizable,
     UNKNOWN_MODEL_ID,
 };
 use tracing::warn;
@@ -282,7 +283,7 @@ pub(crate) fn responses_to_chat(req: &ResponsesRequest) -> Result<ChatCompletion
         ));
     }
 
-    Ok(ChatCompletionRequest {
+    let mut chat = ChatCompletionRequest {
         messages,
         model,
         temperature: req.temperature,
@@ -312,13 +313,19 @@ pub(crate) fn responses_to_chat(req: &ResponsesRequest) -> Result<ChatCompletion
             .as_ref()
             .and_then(|r| r.effort)
             .map(|effort| effort.as_str().to_string()),
+        thinking: req.thinking.clone(),
         // `Default` leaves these false while the HTTP layer defaults them to
         // true; without them a reasoning model's <think> block comes back as
         // message text with any constrained tool-call JSON embedded in it.
         separate_reasoning: true,
         stream_reasoning: is_streaming,
         ..Default::default()
-    })
+    };
+    chat.normalize();
+    if ProviderProfile::for_model(&chat.model) == ProviderProfile::DeepSeek {
+        deepseek::validate_chat(&chat).map_err(|error| error.to_string())?;
+    }
+    Ok(chat)
 }
 
 /// Convert Responses content parts to chat message content. Text, output
@@ -699,6 +706,25 @@ mod tests {
 
     use super::*;
     use crate::routers::grpc::common::responses::utils::namespace_test_request;
+
+    #[test]
+    fn responses_thinking_survives_chat_conversion_and_normalization() {
+        for (thinking, effort, enabled, normalized) in [
+            ("enabled", "none", true, "high"),
+            ("disabled", "max", false, "max"),
+            ("adaptive", "ultra", true, "max"),
+        ] {
+            let req: ResponsesRequest = serde_json::from_value(serde_json::json!({
+                "model":"deepseek-flash", "input":"hi",
+                "thinking":{"type":thinking}, "reasoning":{"effort":effort}
+            }))
+            .unwrap();
+            let chat = responses_to_chat(&req).unwrap();
+            assert_eq!(chat.thinking_toggle(), Some(enabled));
+            assert_eq!(chat.effective_reasoning_effort(), Some(normalized));
+            assert_eq!(chat.chat_template_kwargs.unwrap()["thinking"], enabled);
+        }
+    }
 
     #[test]
     fn chat_to_responses_serializes_responses_api_usage() {

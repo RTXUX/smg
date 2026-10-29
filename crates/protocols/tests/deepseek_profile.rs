@@ -1,4 +1,4 @@
-//! DeepSeek V4 rules calibrated against the official Chat API.
+//! DeepSeek frontend normalization and V4.1 recipe controls.
 use openai_protocol::{
     chat::ChatCompletionRequest, profile::ProviderProfile, validated::Normalizable,
 };
@@ -8,7 +8,7 @@ use validator::Validate;
 #[expect(clippy::expect_used, reason = "test helper")]
 fn request(extra: Value) -> ChatCompletionRequest {
     let mut body =
-        json!({"model": "deepseek-flash", "messages": [{"role": "user", "content": "hello"}]});
+        json!({"model": "deepseek-v4-pro", "messages": [{"role": "user", "content": "hello"}]});
     body.as_object_mut()
         .expect("object")
         .extend(extra.as_object().expect("object").clone());
@@ -55,9 +55,9 @@ fn deepseek_profile_is_limited_to_the_verified_v4_family() {
 #[test]
 fn deepseek_effort_aliases_preserve_thinking_and_normalize_levels() {
     for (input, canonical) in [
-        ("minimal", "low"),
+        ("minimal", "none"),
         ("medium", "high"),
-        ("xhigh", "high"),
+        ("xhigh", "max"),
         ("none", "none"),
         ("low", "low"),
         ("high", "high"),
@@ -77,7 +77,6 @@ fn deepseek_effort_aliases_preserve_thinking_and_normalize_levels() {
 #[test]
 fn deepseek_rejects_unsupported_thinking_and_effort() {
     for extra in [
-        json!({"thinking": {"type": "adaptive"}}),
         json!({"reasoning_effort": "turbo"}),
         json!({"thinking": {"effort": "turbo"}, "reasoning_effort": "high"}),
     ] {
@@ -92,12 +91,13 @@ fn deepseek_forced_tools_require_non_thinking_mode() {
         json!({"type": "function", "function": {"name": "weather"}}),
     ] {
         for (mode, valid) in [
-            (json!({}), false),
+            (json!({}), true),
             (json!({"thinking": {"type": "enabled"}}), false),
             (json!({"thinking": {"type": "disabled"}}), true),
             (json!({"reasoning_effort": "none"}), true),
-            (json!({"reasoning_effort": "minimal"}), false),
+            (json!({"reasoning_effort": "minimal"}), true),
             (json!({"chat_template_kwargs": {"thinking": false}}), true),
+            (json!({"chat_template_kwargs": {"thinking": true}}), false),
             (
                 json!({"chat_template_kwargs": {"enable_thinking": false}}),
                 true,
@@ -123,9 +123,10 @@ fn deepseek_forced_tools_require_non_thinking_mode() {
 #[test]
 fn deepseek_projects_one_thinking_decision_for_validation_and_rendering() {
     for model in ["deepseek-v4-pro", "deepseek-ai/DeepSeek-V4.1-Flash"] {
+        let v41 = model.contains("V4.1");
         for (extra, enabled) in [
-            (json!({}), true),
-            (json!({"reasoning_effort":"minimal"}), true),
+            (json!({}), v41),
+            (json!({"reasoning_effort":"minimal"}), v41),
             (json!({"reasoning_effort":"low"}), true),
             (json!({"reasoning_effort":"none"}), false),
             (
@@ -134,7 +135,7 @@ fn deepseek_projects_one_thinking_decision_for_validation_and_rendering() {
             ),
             (
                 json!({"thinking":{"type":"enabled"},"reasoning_effort":"none"}),
-                true,
+                v41,
             ),
             (
                 json!({"chat_template_kwargs":{"enable_thinking":false},"reasoning_effort":"high"}),
@@ -142,11 +143,11 @@ fn deepseek_projects_one_thinking_decision_for_validation_and_rendering() {
             ),
             (
                 json!({"chat_template_kwargs":{"thinking":true},"thinking":{"type":"disabled"}}),
-                true,
+                false,
             ),
             (
                 json!({"chat_template_kwargs":{"reasoning_effort":"none"},"thinking":{"type":"enabled"}}),
-                false,
+                v41,
             ),
         ] {
             let mut extra = extra;
@@ -187,7 +188,6 @@ fn deepseek_rejects_ambiguous_template_thinking_overrides() {
     for kwargs in [
         json!({"thinking":"bad","enable_thinking":false}),
         json!({"enable_thinking":0}),
-        json!({"thinking":true,"enable_thinking":false}),
     ] {
         let req = request(
             json!({"model":"deepseek-v4-pro","reasoning_effort":"high","chat_template_kwargs":kwargs}),
@@ -268,9 +268,62 @@ fn deepseek_rejects_invalid_or_non_v41_budgets() {
             }
         }
     }
-    for model in ["deepseek-flash", "deepseek-v4-pro"] {
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
         assert!(request(json!({"model":model,"reasoning_effort":42}))
             .validate()
             .is_err());
+    }
+}
+
+#[test]
+fn adaptive_and_aliases_use_one_normalized_thinking_mode() {
+    for model in [
+        "deepseek-v4-pro",
+        "deepseek-flash",
+        "org/deepseek-v41-flash",
+    ] {
+        let req = request(
+            json!({"model":model,"thinking":{"type":"adaptive"},"reasoning_effort":"ultra"}),
+        );
+        assert!(req.validate().is_ok());
+        assert_eq!(req.template_thinking(), Some(true));
+        assert_eq!(req.effective_reasoning_effort(), Some("max"));
+        let kwargs = req.chat_template_kwargs.unwrap();
+        assert_eq!(kwargs["thinking"], true);
+        assert_eq!(kwargs["enable_thinking"], true);
+    }
+}
+
+#[test]
+fn messages_and_token_counts_resolve_the_same_controls() {
+    use openai_protocol::messages::{CountMessageTokensRequest, CreateMessageRequest};
+    for (thinking, effort, enabled, normalized) in [
+        (json!({"type":"adaptive"}), "ultra", true, "max"),
+        (json!({"type":"disabled"}), "max", false, "max"),
+        (json!({"type":"enabled"}), "none", true, "none"),
+        (Value::Null, "minimal", true, "low"),
+        (Value::Null, "none", false, "none"),
+    ] {
+        let body = json!({"model":"deepseek-flash","max_tokens":2048,
+            "messages":[{"role":"user","content":"hi"}],
+            "thinking":thinking,"output_config":{"effort":effort}});
+        let req: CreateMessageRequest = serde_json::from_value(body.clone()).unwrap();
+        let count: CountMessageTokensRequest = serde_json::from_value(body).unwrap();
+        assert_eq!(req.template_thinking(), Some(enabled));
+        assert_eq!(count.template_thinking(), Some(enabled));
+        assert_eq!(req.reasoning_effort(), Some(normalized));
+        assert_eq!(count.reasoning_effort(), Some(normalized));
+    }
+}
+
+#[test]
+fn messages_forced_calls_use_the_recipe_thinking_guard() {
+    for (thinking, valid) in [("adaptive", false), ("disabled", true)] {
+        let request: openai_protocol::messages::CreateMessageRequest = serde_json::from_value(json!({
+            "model":"deepseek-flash","max_tokens":128,"messages":[{"role":"user","content":"hi"}],
+            "thinking":{"type":thinking},"tools":[{"name":"lookup","input_schema":{"type":"object"}}],
+            "tool_choice":{"type":"any"}
+        })).unwrap();
+        assert_eq!(request.validate().is_ok(), valid);
     }
 }

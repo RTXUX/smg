@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use axum::response::Response;
+use axum::{http::HeaderMap, response::Response};
 use engine_zmq_adapter::stops::encode_single_token_stops;
 use llm_tokenizer::traits::Tokenizer;
 use rand::RngExt;
@@ -22,7 +22,7 @@ use crate::{
         error,
         grpc::{
             context::{AttemptStamp, ExecutionPlan, LoadGuards, RequestType, WorkerSelection},
-            proto_wrapper::ProtoGenerateRequest,
+            proto_wrapper::{ProtoEmbedRequest, ProtoGenerateRequest, ProtoRequest},
             utils,
         },
     },
@@ -31,6 +31,28 @@ use crate::{
         DEFAULT_SAMPLING_PARAMS_LABEL,
     },
 };
+
+/// Dynamo's numeric priority header is independent of SMG's admission classes.
+/// Match Dynamo's signed-i32 parsing: whitespace is accepted, malformed or
+/// out-of-range values leave the request's default priority unchanged.
+/// The wire carries the gateway value; vLLM servicers perform the negation.
+pub(crate) fn apply_request_priority(plan: &mut ExecutionPlan, headers: Option<&HeaderMap>) {
+    let Some(priority) = headers
+        .and_then(|headers| headers.get("x-dynamo-request-priority"))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<i32>().ok())
+    else {
+        return;
+    };
+    if let ExecutionPlan::Single(ProtoRequest::Embed(ProtoEmbedRequest::Vllm(request))) = plan {
+        request.priority = priority;
+    }
+    for request in plan.generate_requests_mut() {
+        if let ProtoGenerateRequest::Vllm(request) = request {
+            request.priority = priority;
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SamplingDefaultsMask {
@@ -1811,6 +1833,105 @@ mod wire_prompt_text_tests {
         assert_eq!(
             wire_prompt_text("<|user|><|image|>describe".to_string(), true),
             "<|user|><|image|>describe"
+        );
+    }
+}
+
+#[cfg(test)]
+mod numeric_priority_tests {
+    use prost::Message;
+
+    use super::*;
+    use crate::{routers::grpc::context::ExecutionPlanKind, worker::BasicWorkerBuilder};
+
+    #[test]
+    fn dynamo_header_keeps_its_value_on_every_generate_plan_and_retry() {
+        for (header, expected) in [
+            (None, 0),
+            (Some(" 17 "), 17),
+            (Some("-3"), -3),
+            (Some("0"), 0),
+            (Some("-2147483648"), i32::MIN),
+            (Some("2147483647"), i32::MAX),
+            (Some("2147483648"), 0),
+            (Some("invalid"), 0),
+            (Some("1.5"), 0),
+        ] {
+            let mut headers = HeaderMap::new();
+            if let Some(value) = header {
+                headers.insert("x-dynamo-request-priority", value.parse().unwrap());
+            }
+            // The existing admission class is not a numeric engine priority.
+            headers.insert("x-smg-priority", "system".parse().unwrap());
+            for kind in [
+                ExecutionPlanKind::Single,
+                ExecutionPlanKind::PrefillDecode,
+                ExecutionPlanKind::EncodePrefillDecode,
+            ] {
+                for batched in [false, true] {
+                    let request = || ProtoGenerateRequest::Vllm(Box::default());
+                    let mut plan = if batched {
+                        ExecutionPlan::Batch {
+                            kind,
+                            shared_request_id: "parent".into(),
+                            requests: vec![request(), request()],
+                        }
+                    } else {
+                        ExecutionPlan::generate(kind, request())
+                    };
+                    apply_request_priority(&mut plan, Some(&headers));
+                    let stamp = AttemptStamp {
+                        id: if batched {
+                            IdStamp::Batch(BatchIdStamp {
+                                stable_shared: None,
+                                prefix: "retry_",
+                                unique_subs: true,
+                            })
+                        } else {
+                            IdStamp::Minted { prefix: "retry_" }
+                        },
+                        sampling_mask: None,
+                        sampling_baseline: None,
+                        inject_pd_metadata: false,
+                        tool_constraint: None,
+                    };
+                    let worker = WorkerSelection::Single {
+                        worker: Arc::new(BasicWorkerBuilder::new("grpc://worker:5000").build()),
+                    };
+                    restamp_plan_for_attempt(&mut plan, &stamp, &worker, &ToolParserFactory::new())
+                        .unwrap();
+                    for request in plan.generate_requests_mut() {
+                        let wire = request.as_vllm().encode_to_vec();
+                        assert_eq!(
+                            vllm_proto::GenerateRequest::decode(wire.as_slice())
+                                .unwrap()
+                                .priority,
+                            expected
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn embedding_priority_is_preserved_and_bad_headers_leave_the_default() {
+        let mut plan = ExecutionPlan::embed(ProtoEmbedRequest::Vllm(Box::default()));
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Dynamo-Request-Priority", "-31".parse().unwrap());
+        apply_request_priority(&mut plan, Some(&headers));
+        headers.insert("x-dynamo-request-priority", "bad".parse().unwrap());
+        apply_request_priority(&mut plan, Some(&headers));
+        let ExecutionPlan::Single(ProtoRequest::Embed(ProtoEmbedRequest::Vllm(request))) = plan
+        else {
+            panic!("embedding")
+        };
+        let wire = request.encode_to_vec();
+        assert_eq!(
+            vllm_proto::EmbedRequest::decode(wire.as_slice())
+                .unwrap()
+                .priority,
+            -31
         );
     }
 }

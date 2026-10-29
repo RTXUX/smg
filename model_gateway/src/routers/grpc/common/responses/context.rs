@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use axum::http::HeaderMap;
 use smg_data_connector::{
     ConversationItemStorage, ConversationStorage, RequestContext as StorageRequestContext,
     ResponseStorage,
@@ -19,9 +20,11 @@ use crate::routers::{
 /// Context for /v1/responses endpoint
 ///
 /// Used by both regular and harmony implementations.
-/// All fields are Arc/shared references, so cloning this context is cheap.
+/// Storage and pipeline handles are shared; per-request headers survive each iteration.
 #[derive(Clone)]
 pub(crate) struct ResponsesContext {
+    /// Per-request headers retained by Harmony iterations and background work.
+    pub headers: Option<HeaderMap>,
     /// Chat pipeline for executing requests
     pub pipeline: Arc<RequestPipeline>,
 
@@ -68,6 +71,7 @@ impl ResponsesContext {
         background: Arc<BackgroundResponses>,
     ) -> Self {
         Self {
+            headers: None,
             pipeline,
             components,
             response_storage,

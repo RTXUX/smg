@@ -228,6 +228,10 @@ message GenerateRequest {
   // Set only when the router skipped multimodal processing. Mutually
   // exclusive with mm_inputs; requires `tokenized` input.
   MediaRefs media_refs = 10;
+
+  // Dynamo request-priority scale: larger values are more urgent, default 0.
+  // The servicer negates this once for vLLM's lower-is-higher priority.
+  int32 priority = 12;
 }
 
 // KV cache transfer parameters for Mooncake PD disaggregation
@@ -344,6 +348,8 @@ message MediaIdentity {
 message EmbedRequest {
   string request_id = 1;
   TokenizedInput tokenized = 2;
+  // Same gateway scale as GenerateRequest.priority; negated by the servicer.
+  int32 priority = 3;
 }
 
 message EmbedResponse {

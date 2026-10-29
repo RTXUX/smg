@@ -538,10 +538,12 @@ impl RequestPipeline {
         if let Some(encode) = &stages.encode {
             step!(encode.name(), encode.execute(ctx).await)?;
         }
-        step!(
+        let mut built = step!(
             stages.request_building.name(),
             stages.request_building.build(ctx).await
-        )
+        )?;
+        helpers::apply_request_priority(&mut built.plan, ctx.input.headers.as_ref());
+        Ok(built)
     }
 
     /// One dispatch attempt: (re-)selection for retries, plan stamping,
@@ -1404,8 +1406,8 @@ impl RequestPipeline {
     ) -> Result<harmony::ResponsesIterationResult, Response> {
         let mut ctx = RequestContext::for_responses(
             Arc::new(request.clone()),
-            None,                  // No headers needed for internal pipeline execution
-            request.model.clone(), // Model ID from request
+            harmony_ctx.headers.clone(),
+            request.model.clone(),
             harmony_ctx.components.clone(),
         );
         ctx.input.tenant_request_meta = tenant_request_meta;
@@ -1451,7 +1453,7 @@ impl RequestPipeline {
     ) -> Result<(ExecutionResult, Option<LoadGuards>), Response> {
         let mut ctx = RequestContext::for_responses(
             Arc::new(request.clone()),
-            None,
+            harmony_ctx.headers.clone(),
             request.model.clone(),
             harmony_ctx.components.clone(),
         );

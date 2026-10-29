@@ -2214,6 +2214,7 @@ fn create_cors_layer(allowed_origins: Vec<String>) -> Option<tower_http::cors::C
                 http::header::AUTHORIZATION,
                 http::header::HeaderName::from_static("anthropic-version"),
                 http::header::HeaderName::from_static("anthropic-beta"),
+                http::header::HeaderName::from_static("x-dynamo-request-priority"),
                 http::header::HeaderName::from_static("traceparent"),
                 http::header::HeaderName::from_static("tracestate"),
             ])
@@ -2734,7 +2735,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn configured_cors_allows_anthropic_headers() {
+    async fn configured_cors_allows_anthropic_and_priority_headers() {
         use axum::body::Body;
         use tower::ServiceExt;
 
@@ -2756,7 +2757,7 @@ mod tests {
                     .header("access-control-request-method", "POST")
                     .header(
                         "access-control-request-headers",
-                        "content-type,authorization,anthropic-version,anthropic-beta",
+                        "content-type,authorization,anthropic-version,anthropic-beta,x-dynamo-request-priority",
                     )
                     .body(Body::empty())
                     .unwrap(),
@@ -2776,6 +2777,7 @@ mod tests {
             "authorization",
             "anthropic-version",
             "anthropic-beta",
+            "x-dynamo-request-priority",
         ] {
             assert!(
                 allowed.split(',').any(|value| value.trim() == header),

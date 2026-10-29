@@ -2056,6 +2056,7 @@ mod flush_cache {
 fn embed_request(id: &str, input_ids: Vec<u32>) -> vllm::EmbedRequest {
     vllm::EmbedRequest {
         request_id: id.to_string(),
+        priority: 0,
         tokenized: Some(vllm::TokenizedInput {
             original_text: String::new(),
             input_ids,
@@ -2177,6 +2178,7 @@ async fn embed_without_tokenized_input_is_invalid() {
         vllm::EmbedRequest {
             request_id: "emb-3".to_string(),
             tokenized: None,
+            ..Default::default()
         },
         embed_request("emb-4", Vec::new()),
         embed_request("", vec![1, 2]),
@@ -3350,4 +3352,51 @@ async fn a_shutdown_after_the_engines_completion_ends_the_stream_cleanly() {
         "a clean end after the completion, not a status"
     );
     h.server.stop(Duration::from_secs(5)).expect("clean stop");
+}
+
+/// Check the actual gRPC -> EngineCore wire, including sample fan-out and
+/// the one signed-i32 value whose negation requires a wider integer.
+#[tokio::test]
+async fn generate_priority_is_negated_once_for_each_sample() {
+    let mut h = harness(model_info(), None).await;
+    for priority in [0, 17, -3, i32::MIN, i32::MAX] {
+        for streaming in [false, true] {
+            let mut request = generate_request("priority", streaming, Vec::new());
+            request.priority = priority;
+            request.sampling_params.as_mut().unwrap().n = 2;
+            let mut response = h.client.generate(request).await.unwrap().into_inner();
+            for _ in 0..2 {
+                let core = recv_add(&mut h.engine_in).await;
+                assert_eq!(core.priority, -i64::from(priority));
+                h.engine_out
+                    .send_outputs(&batch(
+                        &core.request_id,
+                        vec![42],
+                        Some(EngineCoreFinishReason::Length),
+                        None,
+                    ))
+                    .await
+                    .unwrap();
+            }
+            while response.message().bounded().await.unwrap().is_some() {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn embed_priority_is_negated_on_the_engine_wire() {
+    let mut h = harness(pooling_model_info(), None).await;
+    let mut request = embed_request("emb-1", vec![1, 2]);
+    request.priority = i32::MIN;
+    let (response, core) = tokio::join!(h.client.embed(request), async {
+        answer_supported_tasks(&mut h.engine_in, &mut h.engine_out, &["embed"]).await;
+        let request = recv_add(&mut h.engine_in).await;
+        h.engine_out
+            .send_frames(vec![Bytes::from(unhex(VLLM_EMBED_OUTPUT_INLINE))])
+            .await
+            .unwrap();
+        request
+    });
+    response.unwrap();
+    assert_eq!(core.priority, 2_147_483_648);
 }

@@ -453,6 +453,7 @@ class VllmEngineServicer(vllm_engine_pb2_grpc.VllmEngineServicer):
 
             self._loads.submitted(request_id, _prompt_length(prompt))
             async for output in self.engine.generate(
+                priority=-request.priority,
                 prompt=prompt,
                 sampling_params=sampling_params,
                 request_id=request_id,
@@ -593,6 +594,7 @@ class VllmEngineServicer(vllm_engine_pb2_grpc.VllmEngineServicer):
             # encode() is an async generator; collect the final result
             final_output = None
             async for output in self.engine.encode(
+                priority=-request.priority,
                 prompt=prompt,
                 pooling_params=pooling_params,
                 request_id=request_id,

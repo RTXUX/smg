@@ -119,6 +119,8 @@ pub struct DeepSeekDsmlParser {
     /// V4.1 streaming: a tool marker has been seen, so everything from it on
     /// belongs to the tool section (text after it is never content again).
     in_tool_section: bool,
+    /// V4.1 ends the turn at the first calls-block close.
+    tool_section_done: bool,
 }
 
 /// The DSML sentinel every tag starts with (`<` + this + tag name).
@@ -253,6 +255,7 @@ impl DeepSeekDsmlParser {
             current_tool_name_sent: false,
             streamed_args_for_tool: Vec::new(),
             in_tool_section: false,
+            tool_section_done: false,
         }
     }
 
@@ -460,9 +463,12 @@ impl DeepSeekDsmlParser {
             .first_tool_marker(text)
             .ok_or_else(|| ParserError::ParsingFailed("DSML marker not found".to_string()))?;
         let normal_text = Self::v41_content(&text[..idx]);
+        let section = text[idx..]
+            .split_once(&self.block_close)
+            .map_or(&text[idx..], |(section, _)| section);
         let tools = self
             .invoke_complete_regex
-            .captures_iter(&text[idx..])
+            .captures_iter(section)
             .map(|cap| {
                 let name = cap.get(1).map_or("", |m| m.as_str());
                 let body = cap.get(2).map_or("", |m| m.as_str());
@@ -480,6 +486,13 @@ impl DeepSeekDsmlParser {
     /// first tool marker on, everything belongs to the tool section: invokes
     /// stream as deltas and any other text is dropped.
     fn parse_incremental_v41(&mut self) -> StreamingParseResult {
+        if self.tool_section_done {
+            self.buffer.clear();
+            return StreamingParseResult {
+                normal_text: String::new(),
+                calls: vec![],
+            };
+        }
         let mut normal_text = String::new();
         if !self.in_tool_section {
             match self.first_tool_marker(&self.buffer) {
@@ -511,7 +524,15 @@ impl DeepSeekDsmlParser {
                 }
             }
         }
+        let close = self.buffer.find(&self.block_close);
+        if let Some(index) = close {
+            self.buffer.truncate(index);
+        }
         let calls = self.stream_invokes(None);
+        if close.is_some() {
+            self.tool_section_done = true;
+            self.buffer.clear();
+        }
         StreamingParseResult { normal_text, calls }
     }
 
@@ -915,5 +936,6 @@ impl ToolParser for DeepSeekDsmlParser {
         self.current_tool_name_sent = false;
         self.streamed_args_for_tool.clear();
         self.in_tool_section = false;
+        self.tool_section_done = false;
     }
 }

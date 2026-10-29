@@ -16,6 +16,24 @@ const TWO_CALLS: &str = "Checking.\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke nam
 
 const SGLANG_CALL: &str = "<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"search\">\n<｜DSML｜ parameter name=\"query\" string=\"true\">{\"a\": 1}</｜DSML｜ parameter>\n<｜DSML｜ parameter name=\"limit\" string=\"false\">2</｜DSML｜ parameter>\n<｜DSML｜ parameter name=\"flags\" string=\"false\">[1, true, null]</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>";
 
+#[tokio::test]
+async fn the_first_block_keeps_all_its_calls_and_ends_the_turn() {
+    let output = format!("{TWO_CALLS}ignored text{SGLANG_CALL}");
+    let (content, calls) = DeepSeekDsmlParser::v41()
+        .parse_complete(&output)
+        .await
+        .unwrap();
+    assert_eq!(content, "Checking.");
+    assert_eq!(calls.len(), 2);
+    for size in 1..=output.chars().count() {
+        let (content, calls) = stream(&output, size).await;
+        assert_eq!(content, "Checking.", "chunk size {size}");
+        assert_eq!(calls.len(), 2, "chunk size {size}");
+        assert_eq!(calls[0].0.as_deref(), Some("get_weather"));
+        assert_eq!(calls[1].0.as_deref(), Some("get_weather"));
+    }
+}
+
 /// Stream `text` in chunks of `chunk_chars` characters through a fresh V4.1
 /// parser with no tool list; returns the content and per-tool argument bytes.
 #[expect(clippy::unwrap_used, reason = "test helper — panics are intentional")]

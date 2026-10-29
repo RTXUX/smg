@@ -35,6 +35,8 @@ pub fn deepseek_v4_1() -> Format {
         .state("reasoning", Emits::Reasoning)
         .state("calls", Emits::Wrapper)
         .state("invoke", Emits::Arguments)
+        .state("done", Emits::Content)
+        .framing("done")
         .transition("content", "think_open", "reasoning")
         .transition("reasoning", "think_close", "content")
         .transition("content", "calls_open", "calls")
@@ -44,8 +46,8 @@ pub fn deepseek_v4_1() -> Format {
         .transition("calls", "invoke_open", "invoke")
         .transition("invoke", "invoke_close", "calls")
         .transition("invoke", "invoke_open", "invoke")
-        .transition("invoke", "calls_close", "content")
-        .transition("calls", "calls_close", "content")
+        .transition("invoke", "calls_close", "done")
+        .transition("calls", "calls_close", "done")
         .calls(CallSyntax::Attributed(Tags::DSML))
         .opens_turn("<｜Assistant｜>")
 }
@@ -118,6 +120,25 @@ mod tests {
             )
             .expect("end");
         out.into_owned().drain()
+    }
+
+    #[test]
+    fn the_first_calls_block_ends_the_turn_after_all_its_invokes() {
+        let output = format!("{OUTPUT}ignored{OUTPUT}");
+        for cut in output.char_indices().map(|(index, _)| index) {
+            let events = run("<｜Assistant｜><think>", &[&output[..cut], &output[cut..]]);
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, Event::ToolCallStart { .. }))
+                    .count(),
+                2
+            );
+            assert!(!events.iter().any(
+                |event| matches!(event, Event::Content(text) if text.text.contains("ignored"))
+            ));
+            assert_eq!(bytes(&events), output);
+        }
     }
 
     #[test]
@@ -489,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn the_blocks_close_ends_an_invoke_left_open_and_the_prose_after_it_stays() {
+    fn the_blocks_close_ends_an_invoke_left_open_and_discards_later_prose() {
         let output = concat!(
             "</think>\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"f\">\n",
             "<｜DSML｜ parameter name=\"a\" string=\"true\">x</｜DSML｜ parameter>\n",
@@ -505,9 +526,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // The newline after `</think>` is the template's spacing before the block, dropped; the
-        // one after the block comes before text, so it is the text's.
-        assert_eq!(content, "\nThe weather is sunny.");
+        // The calls block ends the turn, including the following newline.
+        assert_eq!(content, "");
     }
 
     #[test]

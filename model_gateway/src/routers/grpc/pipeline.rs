@@ -4858,12 +4858,8 @@ mod request_release_tests {
     // test.
     // ------------------------------------------------------------------
 
-    const V41_RENDER_FIXTURES: &str = include_str!(
-        "../../../../crates/tokenizer/tests/fixtures/deepseek_v41/render_fixtures.json"
-    );
-    const V41_ID_FIXTURES: &str = include_str!(
-        "../../../../crates/tokenizer/tests/fixtures/deepseek_v41/render_ids_fixtures.json"
-    );
+    const V41_RECIPE_FIXTURES: &str =
+        include_str!("../../../../crates/tokenizer/tests/fixtures/deepseek_v41/recipe.json");
     const V41_CORN_PNG: &[u8] =
         include_bytes!("../../../../crates/multimodal/tests/fixtures/images/deepseek_v41_corn.png");
     /// `<｜deepseek_image｜>` in the checkpoint's `config.json`.
@@ -4893,20 +4889,16 @@ mod request_release_tests {
     /// The recorded request (`messages`, kwargs) and reference ids of one
     /// tokenizer-crate fixture case.
     fn v41_fixture(name: &str) -> (serde_json::Value, Vec<u32>) {
-        let render: serde_json::Value =
-            serde_json::from_str(V41_RENDER_FIXTURES).expect("render fixtures");
-        let ids: serde_json::Value = serde_json::from_str(V41_ID_FIXTURES).expect("id fixtures");
-        let find = |doc: &serde_json::Value| {
-            doc["cases"]
-                .as_array()
-                .expect("cases")
-                .iter()
-                .find(|case| case["name"] == name)
-                .unwrap_or_else(|| panic!("fixture case {name}"))
-                .clone()
-        };
-        let case = find(&render);
-        let ids = find(&ids)["ids"]
+        let recipe: serde_json::Value =
+            serde_json::from_str(V41_RECIPE_FIXTURES).expect("recipe fixtures");
+        let case = recipe["cases"]
+            .as_array()
+            .expect("cases")
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap_or_else(|| panic!("fixture case {name}"))
+            .clone();
+        let ids = case["ids"]
             .as_array()
             .expect("ids")
             .iter()
@@ -5050,55 +5042,40 @@ mod request_release_tests {
             skip_no_tokenizer();
             return;
         };
-
-        let (case, expected) = v41_fixture("hf_2");
-        let (status, body, ids, _) = v41_run_chat(
-            &dir,
-            serde_json::json!({
-                "model": MODEL,
-                "messages": case["messages"],
-                "chat_template_kwargs": {"thinking": false, "drop_thinking": true},
-                "max_tokens": 1,
-            }),
-            false,
-        )
-        .await;
-        assert_eq!(
-            status,
-            http::StatusCode::OK,
-            "{}",
-            String::from_utf8_lossy(&body)
-        );
-        assert_eq!(
-            ids,
-            vec![expected],
-            "hf_2: prompt ids differ from the reference"
-        );
-
-        let (case, expected) = v41_fixture("continue_final_message_current");
-        let (status, body, ids, _) = v41_run_chat(
-            &dir,
-            serde_json::json!({
-                "model": MODEL,
-                "messages": case["messages"],
-                "continue_final_message": true,
-                "chat_template_kwargs": {"thinking": true, "drop_thinking": true},
-                "max_tokens": 1,
-            }),
-            false,
-        )
-        .await;
-        assert_eq!(
-            status,
-            http::StatusCode::OK,
-            "{}",
-            String::from_utf8_lossy(&body)
-        );
-        assert_eq!(
-            ids,
-            vec![expected],
-            "continue_final_message: prompt ids differ from the reference's no-EOS rendering"
-        );
+        for name in [
+            "history_retains_thinking",
+            "history_drops_thinking",
+            "assistant_prefix",
+            "chat_prefix",
+        ] {
+            let (case, expected) = v41_fixture(name);
+            let continues = case["messages"].as_array().unwrap().last().unwrap()["prefix"] == true;
+            let (status, body, ids, _) = v41_run_chat(
+                &dir,
+                serde_json::json!({
+                    "model": MODEL, "messages": case["messages"],
+                    "continue_final_message": continues,
+                    "chat_template_kwargs": {
+                        "thinking": case["thinking"].as_bool().unwrap_or(true),
+                        "drop_thinking": case["drop_thinking"].as_bool().unwrap_or(false)
+                    },
+                    "max_tokens": 1,
+                }),
+                false,
+            )
+            .await;
+            assert_eq!(
+                status,
+                http::StatusCode::OK,
+                "{}",
+                String::from_utf8_lossy(&body)
+            );
+            assert_eq!(
+                ids,
+                vec![expected],
+                "{name}: worker prompt IDs differ from recipe"
+            );
+        }
     }
 
     /// A renderer validation error (an effort level the reference rejects) is

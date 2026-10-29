@@ -339,6 +339,7 @@ impl BuildStage for ChatRequestBuildingStage {
             chat_request.as_ref(),
             tool_constraints.as_ref(),
             &processed_messages.text,
+            &token_ids,
             &ctx.components.templates,
         )
         .map_err(|why| error::bad_request("invalid_parser_configuration", why))?;

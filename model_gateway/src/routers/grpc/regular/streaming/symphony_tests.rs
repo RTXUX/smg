@@ -31,6 +31,7 @@ fn assigned(mut spec: ChatResponseSpec, format: Format, prompt: &str) -> ChatRes
     spec.symphony = Some(Assignment {
         format,
         prompt: prompt.to_string(),
+        prompt_token_ids: vec![],
     });
     spec
 }
@@ -359,6 +360,7 @@ fn assigned_message(format: Format, prompt: &str, thinking: bool) -> MessagesRes
         symphony: Some(Assignment {
             format,
             prompt: prompt.to_string(),
+            prompt_token_ids: vec![],
         }),
     }
 }

@@ -125,22 +125,25 @@ pub(crate) fn reads(
     if parser != ParserChoice::Symphony {
         return Ok(None);
     }
-    if names_template(names) {
-        return templates.format(model).map(Some);
-    }
-    let table = match named_table(names) {
-        Some(table) => table,
-        None if names.tool.is_none() && !is_passthrough(names.reasoning.as_deref()) => {
-            return Ok(for_model(model))
+    let format = if names_template(names) {
+        templates.format(model)?
+    } else {
+        let table = match named_table(names) {
+            Some(table) => table,
+            None if names.tool.is_none() && !is_passthrough(names.reasoning.as_deref()) => {
+                return Ok(for_model(model)
+                    .map(|format| format.marker_tokens(templates.marker_tokens(model))))
+            }
+            None => return Ok(None),
+        };
+        // The registry's table comes with the model's own turn opener; a table named for a model
+        // the registry reads with another, or does not know, replays from the table's own.
+        match for_model(model) {
+            Some(format) if table_for(model) == Some(table) => format,
+            _ => table.format(),
         }
-        None => return Ok(None),
     };
-    // The registry's table comes with the model's own turn opener; a table named for a model
-    // the registry reads with another, or does not know, replays from the table's own.
-    Ok(match for_model(model) {
-        Some(format) if table_for(model) == Some(table) => Some(format),
-        _ => Some(table.format()),
-    })
+    Ok(Some(format.marker_tokens(templates.marker_tokens(model))))
 }
 
 /// Whether the parser names set for a model (the flags, or one worker's labels) are names the
@@ -482,6 +485,7 @@ pub(crate) fn auto_constraint_messages(
 pub(crate) struct Assignment {
     pub format: Format,
     pub prompt: String,
+    pub prompt_token_ids: Vec<u32>,
 }
 
 /// The assignment of `format` to a response, with the part of `prompt` the engine replays. Not
@@ -492,14 +496,25 @@ fn assignment(
     model: &str,
     constraint: Option<&(String, String)>,
     prompt: &str,
-) -> Option<Assignment> {
-    let format = format?;
+    prompt_token_ids: &[u32],
+) -> Result<Option<Assignment>, String> {
+    let Some(format) = format else {
+        return Ok(None);
+    };
     if constraint.is_some_and(|(kind, _)| kind == "json_schema") {
-        return None;
+        return Ok(None);
     }
     debug!(model, table = format.name(), "Symphony reads the response");
-    let prompt = format.replay(prompt).to_string();
-    Some(Assignment { format, prompt })
+    let (prompt, index) = format.replay_tokenized(prompt, prompt_token_ids)?;
+    let prompt_token_ids = index.map_or_else(
+        || prompt_token_ids.to_vec(),
+        |index| prompt_token_ids[index..].to_vec(),
+    );
+    Ok(Some(Assignment {
+        format,
+        prompt: prompt.to_string(),
+        prompt_token_ids,
+    }))
 }
 
 /// The table as the request's asks make it: without its calls when the request declares no tools
@@ -528,6 +543,7 @@ pub(crate) fn assign(
     request: &ChatCompletionRequest,
     constraint: Option<&(String, String)>,
     prompt: &str,
+    prompt_token_ids: &[u32],
     templates: &Templates,
 ) -> Result<Option<Assignment>, String> {
     let format = reads(parser, names, &request.model, templates)?;
@@ -536,7 +552,7 @@ pub(crate) fn assign(
         Some(ToolChoice::Value(ToolChoiceValue::None))
     ) || request.effective_tools().next().is_none();
     let format = format.map(|format| asked(format, no_calls, !request.separate_reasoning));
-    Ok(assignment(format, &request.model, constraint, prompt))
+    assignment(format, &request.model, constraint, prompt, prompt_token_ids)
 }
 
 /// [`assign`] for a Messages request: its thinking blocks are always its own, so only the
@@ -547,13 +563,14 @@ pub(crate) fn assign_messages(
     request: &CreateMessageRequest,
     constraint: Option<&(String, String)>,
     prompt: &str,
+    prompt_token_ids: &[u32],
     templates: &Templates,
 ) -> Result<Option<Assignment>, String> {
     let format = reads(parser, names, &request.model, templates)?;
     let no_calls = matches!(request.tool_choice, Some(MessagesToolChoice::None))
         || request.tools.as_deref().is_none_or(<[_]>::is_empty);
     let format = format.map(|format| asked(format, no_calls, false));
-    Ok(assignment(format, &request.model, constraint, prompt))
+    assignment(format, &request.model, constraint, prompt, prompt_token_ids)
 }
 
 /// The engine's finish reason as Symphony takes it.
@@ -657,7 +674,7 @@ impl Reader {
             first_call_only: false,
         };
         reader.feed(Input::Prompt {
-            token_ids: &[],
+            token_ids: &assignment.prompt_token_ids,
             text: &assignment.prompt,
         })?;
         Ok(reader)
@@ -801,7 +818,7 @@ impl Reader {
 mod tests {
     use std::sync::Arc;
 
-    use llm_tokenizer::registry::TokenizerRegistry;
+    use llm_tokenizer::{registry::TokenizerRegistry, MockTokenizer};
     use serde_json::{json, Value};
     use symphony::{formats::qwen3, CallSyntax};
 
@@ -846,7 +863,16 @@ mod tests {
         constraint: Option<&(String, String)>,
         prompt: &str,
     ) -> Option<Assignment> {
-        super::assign(parser, names, request, constraint, prompt, &templates()).expect("no hf")
+        super::assign(
+            parser,
+            names,
+            request,
+            constraint,
+            prompt,
+            &[],
+            &templates(),
+        )
+        .expect("no hf")
     }
 
     /// [`super::constraint`] with no templates, as [`assign`].
@@ -1477,6 +1503,7 @@ mod tests {
         let assignment = Assignment {
             format: qwen3(CallSyntax::Json),
             prompt: String::new(),
+            prompt_token_ids: vec![],
         };
         let mut reader = Reader::new(&assignment, &[]).expect("a reader");
         assert!(!reader.ended());
@@ -1532,9 +1559,17 @@ mod tests {
         );
         // What the request asks of the channels takes a variant of the templates' table.
         let kept = request(json!({"separate_reasoning": false}));
-        let assigned = super::assign(ParserChoice::Symphony, &hf, &kept, None, PROMPT, &templates)
-            .expect("read")
-            .expect("assigned");
+        let assigned = super::assign(
+            ParserChoice::Symphony,
+            &hf,
+            &kept,
+            None,
+            PROMPT,
+            &[],
+            &templates,
+        )
+        .expect("read")
+        .expect("assigned");
         assert_eq!(
             assigned.format,
             read(&hf, &kept)
@@ -1555,6 +1590,7 @@ mod tests {
             &unknown,
             None,
             PROMPT,
+            &[],
             &templates
         )
         .is_err());
@@ -1564,6 +1600,7 @@ mod tests {
             &request(json!({})),
             None,
             PROMPT,
+            &[],
             &templates,
         )
         .expect("read")
@@ -1716,6 +1753,7 @@ mod tests {
             &message_request(json!({"tool_choice": {"type": "none"}})),
             None,
             PROMPT,
+            &[],
             &templates(),
         )
         .expect("read")
@@ -1752,6 +1790,7 @@ mod tests {
             &message_request(json!({})),
             None,
             PROMPT,
+            &[],
             &templates(),
         )
         .expect("read")
@@ -1786,6 +1825,7 @@ mod tests {
         let assignment = Assignment {
             format,
             prompt: "<|im_start|>assistant\n".to_string(),
+            prompt_token_ids: vec![],
         };
         let mut reader = Reader::new(&assignment, &tools()).expect("a reader");
         let mut events = reader.tail(QWEN3_OUTPUT).expect("read");
@@ -1802,6 +1842,7 @@ mod tests {
         let assignment = Assignment {
             format: qwen3(CallSyntax::Json),
             prompt: "<|im_start|>assistant\n".to_string(),
+            prompt_token_ids: vec![],
         };
         let calls = |first_only: bool| {
             let mut reader = Reader::new(&assignment, &tools())
@@ -1837,6 +1878,7 @@ mod tests {
         let assignment = Assignment {
             format: symphony::formats::json().without_calls(),
             prompt: String::new(),
+            prompt_token_ids: vec![],
         };
         let mut reader = Reader::new(&assignment, &[]).expect("a reader");
         let answer = "{\"answer\": 42}";
@@ -1910,5 +1952,116 @@ mod tests {
             panic!("a finish");
         };
         assert_eq!(*reasoning_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn deepseek_marker_ids_drive_grammar_and_parsing_together() {
+        let model = "deepseek-ai/DeepSeek-V4.1-Flash";
+        let tokenizer = MockTokenizer::new().with_added_tokens(&[
+            ("｜DSML｜", 128825),
+            ("<｜Assistant｜>", 128804),
+            ("</think>", 128822),
+        ]);
+        let templates = template::fixtures::templates_with(model, Arc::new(tokenizer)).await;
+        let declared = serde_json::to_value(tools()).expect("declared tools");
+        let required = request(json!({
+            "model": model,
+            "tools": declared,
+            "tool_choice": "required",
+        }));
+        let Some(ToolConstraint::StructuralTag(tag)) = super::constraint(
+            ParserChoice::Symphony,
+            &Names::default(),
+            &required,
+            &tools(),
+            false,
+            &templates,
+        )
+        .expect("constraint") else {
+            panic!("a structural tag")
+        };
+        assert!(tag.contains("\"token\":128825"), "{tag}");
+        assert!(!tag.contains("\"token\":\"｜DSML｜\""), "{tag}");
+
+        let assignment = super::assign(
+            ParserChoice::Symphony,
+            &Names::default(),
+            &required,
+            None,
+            "",
+            &[],
+            &templates,
+        )
+        .expect("assignment")
+        .expect("assigned");
+        let read = |segments: &[(&str, u32)]| {
+            let mut engine = Engine::new(assignment.format.clone(), Declared::of(&tools()));
+            let mut events = Events::new();
+            engine
+                .feed(
+                    Input::Prompt {
+                        token_ids: &[],
+                        text: "<｜Assistant｜></think>",
+                    },
+                    &mut events,
+                )
+                .expect("prompt");
+            for (text, id) in segments {
+                engine
+                    .feed(
+                        Input::Delta {
+                            token_ids: &[*id],
+                            text,
+                            spans: &[TokenSpan {
+                                token_id: *id,
+                                start: 0,
+                                end: text.len(),
+                                continued: false,
+                            }],
+                        },
+                        &mut events,
+                    )
+                    .expect("delta");
+            }
+            engine
+                .feed(
+                    Input::End {
+                        finish: EngineFinish::Stop,
+                    },
+                    &mut events,
+                )
+                .expect("end");
+            events.drain()
+        };
+        let special = [
+            ("<", 1),
+            ("｜DSML｜", 128825),
+            (" calls>\n<", 1),
+            ("｜DSML｜", 128825),
+            (" invoke name=\"lookup\">\n</", 1),
+            ("｜DSML｜", 128825),
+            (" invoke>\n</", 1),
+            ("｜DSML｜", 128825),
+            (" calls>", 1),
+        ];
+        let events = read(&special);
+        assert!(matches!(
+            events.last(),
+            Some(Event::Finish { tool_calls: 1, .. })
+        ));
+        let plain = special.map(|(text, _)| (text, 1));
+        let events = read(&plain);
+        assert!(matches!(
+            events.last(),
+            Some(Event::Finish { tool_calls: 0, .. })
+        ));
+        let content: String = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Content(text) => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(content, special.map(|(text, _)| text).concat());
     }
 }

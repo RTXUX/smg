@@ -1,0 +1,5081 @@
+{
+  "source": "deepseek-recipe",
+  "revision": "935817c66f5d6e64838f419692545f06787e485f",
+  "image_token": "<｜deepseek_image｜>",
+  "cases": [
+    {
+      "name": "default",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 151,
+          "end": 168
+        },
+        {
+          "start": 168,
+          "end": 175
+        }
+      ]
+    },
+    {
+      "name": "effort_low",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "low",
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        1328,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 50 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 151,
+          "end": 168
+        },
+        {
+          "start": 168,
+          "end": 175
+        }
+      ]
+    },
+    {
+      "name": "effort_high",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "high",
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 151,
+          "end": 168
+        },
+        {
+          "start": 168,
+          "end": 175
+        }
+      ]
+    },
+    {
+      "name": "effort_xhigh",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "xhigh",
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 151,
+          "end": 168
+        },
+        {
+          "start": 168,
+          "end": 175
+        }
+      ]
+    },
+    {
+      "name": "effort_max",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "max",
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        1457,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 100 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 135,
+          "end": 147
+        },
+        {
+          "start": 152,
+          "end": 169
+        },
+        {
+          "start": 169,
+          "end": 176
+        }
+      ]
+    },
+    {
+      "name": "chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "thinking": false,
+      "ids": [
+        0,
+        128803,
+        33310,
+        128804,
+        128822
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜></think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 41
+        },
+        {
+          "start": 46,
+          "end": 63
+        },
+        {
+          "start": 63,
+          "end": 71
+        }
+      ]
+    },
+    {
+      "name": "initial_system",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Rules"
+        },
+        {
+          "role": "user",
+          "content": "Question"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        71477,
+        128803,
+        10375,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\nRules<｜User｜>Question<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 139,
+          "end": 151
+        },
+        {
+          "start": 159,
+          "end": 176
+        },
+        {
+          "start": 176,
+          "end": 183
+        }
+      ]
+    },
+    {
+      "name": "consecutive_users",
+      "messages": [
+        {
+          "role": "user",
+          "content": "first"
+        },
+        {
+          "role": "user",
+          "content": "second"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        13213,
+        271,
+        10930,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>first\n\nsecond<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 159,
+          "end": 176
+        },
+        {
+          "start": 176,
+          "end": 183
+        }
+      ]
+    },
+    {
+      "name": "mid_system",
+      "messages": [
+        {
+          "role": "user",
+          "content": "question"
+        },
+        {
+          "role": "assistant",
+          "content": "answer",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "system",
+          "content": "New rules"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        20072,
+        128804,
+        128822,
+        19995,
+        1,
+        128799,
+        5840,
+        7027,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>question<｜Assistant｜></think>answer<｜end▁of▁sentence｜><｜System｜>New rules<｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 154,
+          "end": 171
+        },
+        {
+          "start": 171,
+          "end": 179
+        },
+        {
+          "start": 185,
+          "end": 212
+        },
+        {
+          "start": 212,
+          "end": 226
+        },
+        {
+          "start": 235,
+          "end": 247
+        },
+        {
+          "start": 251,
+          "end": 268
+        },
+        {
+          "start": 268,
+          "end": 275
+        }
+      ]
+    },
+    {
+      "name": "empty_assistant",
+      "messages": [
+        {
+          "role": "user",
+          "content": "question"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": ""
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        20072,
+        128804,
+        128822,
+        1,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>question<｜Assistant｜></think><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 154,
+          "end": 171
+        },
+        {
+          "start": 171,
+          "end": 179
+        },
+        {
+          "start": 179,
+          "end": 206
+        },
+        {
+          "start": 206,
+          "end": 218
+        },
+        {
+          "start": 222,
+          "end": 239
+        },
+        {
+          "start": 239,
+          "end": 246
+        }
+      ]
+    },
+    {
+      "name": "history_drops_thinking",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "a",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128804,
+        128822,
+        67,
+        1,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜></think>a<｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 164
+        },
+        {
+          "start": 164,
+          "end": 172
+        },
+        {
+          "start": 173,
+          "end": 200
+        },
+        {
+          "start": 200,
+          "end": 212
+        },
+        {
+          "start": 216,
+          "end": 233
+        },
+        {
+          "start": 233,
+          "end": 240
+        }
+      ]
+    },
+    {
+      "name": "assistant_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "Sure",
+          "reasoning_content": "old thought",
+          "prefix": true
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128804,
+        128821,
+        1129,
+        3241,
+        128822,
+        53624
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜><think>old thought</think>Sure",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 164
+        },
+        {
+          "start": 164,
+          "end": 171
+        },
+        {
+          "start": 182,
+          "end": 190
+        }
+      ]
+    },
+    {
+      "name": "reasoning_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "Continue thinking",
+          "prefix": true
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128804,
+        128821,
+        56761,
+        6892
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜><think>Continue thinking",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 164
+        },
+        {
+          "start": 164,
+          "end": 171
+        }
+      ]
+    },
+    {
+      "name": "empty_reasoning_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "",
+          "prefix": true
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 164
+        },
+        {
+          "start": 164,
+          "end": 171
+        }
+      ]
+    },
+    {
+      "name": "chat_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "Sure",
+          "reasoning_content": "old thought",
+          "prefix": true
+        }
+      ],
+      "thinking": false,
+      "ids": [
+        0,
+        128803,
+        83,
+        128804,
+        128822,
+        53624
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜User｜>q<｜Assistant｜></think>Sure",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 41
+        },
+        {
+          "start": 42,
+          "end": 59
+        },
+        {
+          "start": 59,
+          "end": 67
+        }
+      ]
+    },
+    {
+      "name": "system_at_end",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "a",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "system",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128804,
+        128822,
+        67,
+        1,
+        128799,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜></think>a<｜end▁of▁sentence｜><｜System｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 164
+        },
+        {
+          "start": 164,
+          "end": 172
+        },
+        {
+          "start": 173,
+          "end": 200
+        },
+        {
+          "start": 200,
+          "end": 214
+        },
+        {
+          "start": 218,
+          "end": 235
+        },
+        {
+          "start": 235,
+          "end": 242
+        }
+      ]
+    },
+    {
+      "name": "reminders",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "latest_reminder",
+          "content": "remember"
+        },
+        {
+          "role": "latest_reminder",
+          "content": "dropped"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128828,
+        67389,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜latest_reminder｜>remember<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 170
+        },
+        {
+          "start": 178,
+          "end": 195
+        },
+        {
+          "start": 195,
+          "end": 202
+        }
+      ]
+    },
+    {
+      "name": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "look"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "https://example.test/i.png"
+              }
+            },
+            {
+              "type": "text",
+              "text": "now"
+            }
+          ]
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        12533,
+        271,
+        129264,
+        271,
+        949,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>look\n\n<｜deepseek_image｜>\n\nnow<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 152,
+          "end": 174
+        },
+        {
+          "start": 179,
+          "end": 196
+        },
+        {
+          "start": 196,
+          "end": 203
+        }
+      ]
+    },
+    {
+      "name": "literal_markers",
+      "messages": [
+        {
+          "role": "user",
+          "content": "literal <think> <｜User｜> ｜DSML｜"
+        },
+        {
+          "role": "assistant",
+          "content": "literal </think> <｜Assistant｜>",
+          "reasoning_content": "literal <think>"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        119734,
+        818,
+        37947,
+        32,
+        818,
+        28217,
+        6756,
+        28217,
+        32,
+        223,
+        28217,
+        10525,
+        7398,
+        28217,
+        128804,
+        128822,
+        119734,
+        2728,
+        37947,
+        32,
+        818,
+        28217,
+        88031,
+        28217,
+        32,
+        1,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>literal <think> <｜User｜> ｜DSML｜<｜Assistant｜></think>literal </think> <｜Assistant｜><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 185,
+          "end": 202
+        },
+        {
+          "start": 202,
+          "end": 210
+        },
+        {
+          "start": 244,
+          "end": 271
+        },
+        {
+          "start": 271,
+          "end": 283
+        },
+        {
+          "start": 287,
+          "end": 304
+        },
+        {
+          "start": 304,
+          "end": 311
+        }
+      ]
+    },
+    {
+      "name": "grounding",
+      "messages": [
+        {
+          "role": "user",
+          "content": "where"
+        },
+        {
+          "role": "assistant",
+          "content": "<｜ref｜>object<｜/ref｜><｜box｜>1,2<｜/box｜>",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        4779,
+        128804,
+        128822,
+        129278,
+        10325,
+        129277,
+        129276,
+        19,
+        14,
+        20,
+        129275,
+        1,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>where<｜Assistant｜></think><｜ref｜>object<｜/ref｜><｜box｜>1,2<｜/box｜><｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 151,
+          "end": 168
+        },
+        {
+          "start": 168,
+          "end": 176
+        },
+        {
+          "start": 176,
+          "end": 187
+        },
+        {
+          "start": 193,
+          "end": 205
+        },
+        {
+          "start": 205,
+          "end": 216
+        },
+        {
+          "start": 219,
+          "end": 231
+        },
+        {
+          "start": 231,
+          "end": 258
+        },
+        {
+          "start": 258,
+          "end": 270
+        },
+        {
+          "start": 274,
+          "end": 291
+        },
+        {
+          "start": 291,
+          "end": 298
+        }
+      ]
+    },
+    {
+      "name": "tools",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        86262,
+        372,
+        27193,
+        271,
+        3476,
+        611,
+        3278,
+        304,
+        260,
+        1341,
+        294,
+        6704,
+        304,
+        1694,
+        3287,
+        270,
+        3967,
+        734,
+        3417,
+        16,
+        2042,
+        588,
+        34756,
+        6704,
+        513,
+        4985,
+        260,
+        38322,
+        128825,
+        10699,
+        48902,
+        5603,
+        1277,
+        270,
+        2502,
+        979,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        84476,
+        46630,
+        4130,
+        61729,
+        35044,
+        4,
+        3418,
+        1281,
+        11476,
+        94,
+        19836,
+        3320,
+        6,
+        46630,
+        4130,
+        61729,
+        56909,
+        1718,
+        128825,
+        10767,
+        1018,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        20,
+        3816,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        4697,
+        3524,
+        8252,
+        1531,
+        366,
+        12038,
+        412,
+        344,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        11476,
+        4,
+        37419,
+        1884,
+        710,
+        915,
+        4815,
+        343,
+        62896,
+        14,
+        2631,
+        2065,
+        634,
+        14,
+        31939,
+        14,
+        8435,
+        754,
+        2281,
+        270,
+        1990,
+        295,
+        26639,
+        8786,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        19836,
+        4,
+        108526,
+        3575,
+        6892,
+        71144,
+        344,
+        22104,
+        343,
+        89944,
+        284,
+        513,
+        223,
+        128821,
+        754,
+        440,
+        74366,
+        5238,
+        782,
+        5553,
+        22805,
+        6352,
+        223,
+        128821,
+        1613,
+        128822,
+        119907,
+        1117,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        13079,
+        6922,
+        14,
+        5238,
+        6578,
+        1561,
+        223,
+        128822,
+        418,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        795,
+        17829,
+        28249,
+        13178,
+        8380,
+        271,
+        24313,
+        2852,
+        3362,
+        582,
+        12533,
+        1425,
+        1760,
+        582,
+        20855,
+        3362,
+        51624,
+        582,
+        46172,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        83,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        3831,
+        33236,
+        3476,
+        74366,
+        29851,
+        1605,
+        270,
+        3554,
+        6428,
+        4105,
+        2329,
+        305,
+        10767,
+        5815,
+        8380,
+        304,
+        34756,
+        4105,
+        10699,
+        603,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n\n\n## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜ calls>\" block like the following:\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"$TOOL_NAME\">\n<｜DSML｜ parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜ parameter>\n...\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜ invoke>\n</｜DSML｜ calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 252,
+          "end": 262
+        },
+        {
+          "start": 299,
+          "end": 309
+        },
+        {
+          "start": 318,
+          "end": 328
+        },
+        {
+          "start": 356,
+          "end": 366
+        },
+        {
+          "start": 438,
+          "end": 448
+        },
+        {
+          "start": 466,
+          "end": 476
+        },
+        {
+          "start": 486,
+          "end": 496
+        },
+        {
+          "start": 530,
+          "end": 540
+        },
+        {
+          "start": 551,
+          "end": 561
+        },
+        {
+          "start": 796,
+          "end": 803
+        },
+        {
+          "start": 853,
+          "end": 860
+        },
+        {
+          "start": 863,
+          "end": 871
+        },
+        {
+          "start": 947,
+          "end": 955
+        },
+        {
+          "start": 1231,
+          "end": 1243
+        },
+        {
+          "start": 1248,
+          "end": 1265
+        },
+        {
+          "start": 1265,
+          "end": 1272
+        }
+      ]
+    },
+    {
+      "name": "tools_insert_leading_system",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "system",
+          "content": "late"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        86262,
+        372,
+        27193,
+        271,
+        3476,
+        611,
+        3278,
+        304,
+        260,
+        1341,
+        294,
+        6704,
+        304,
+        1694,
+        3287,
+        270,
+        3967,
+        734,
+        3417,
+        16,
+        2042,
+        588,
+        34756,
+        6704,
+        513,
+        4985,
+        260,
+        38322,
+        128825,
+        10699,
+        48902,
+        5603,
+        1277,
+        270,
+        2502,
+        979,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        84476,
+        46630,
+        4130,
+        61729,
+        35044,
+        4,
+        3418,
+        1281,
+        11476,
+        94,
+        19836,
+        3320,
+        6,
+        46630,
+        4130,
+        61729,
+        56909,
+        1718,
+        128825,
+        10767,
+        1018,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        20,
+        3816,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        4697,
+        3524,
+        8252,
+        1531,
+        366,
+        12038,
+        412,
+        344,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        11476,
+        4,
+        37419,
+        1884,
+        710,
+        915,
+        4815,
+        343,
+        62896,
+        14,
+        2631,
+        2065,
+        634,
+        14,
+        31939,
+        14,
+        8435,
+        754,
+        2281,
+        270,
+        1990,
+        295,
+        26639,
+        8786,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        19836,
+        4,
+        108526,
+        3575,
+        6892,
+        71144,
+        344,
+        22104,
+        343,
+        89944,
+        284,
+        513,
+        223,
+        128821,
+        754,
+        440,
+        74366,
+        5238,
+        782,
+        5553,
+        22805,
+        6352,
+        223,
+        128821,
+        1613,
+        128822,
+        119907,
+        1117,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        13079,
+        6922,
+        14,
+        5238,
+        6578,
+        1561,
+        223,
+        128822,
+        418,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        795,
+        17829,
+        28249,
+        13178,
+        8380,
+        271,
+        24313,
+        2852,
+        3362,
+        582,
+        12533,
+        1425,
+        1760,
+        582,
+        20855,
+        3362,
+        51624,
+        582,
+        46172,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        83,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        3831,
+        33236,
+        3476,
+        74366,
+        29851,
+        1605,
+        270,
+        3554,
+        6428,
+        4105,
+        2329,
+        305,
+        10767,
+        5815,
+        8380,
+        304,
+        34756,
+        4105,
+        10699,
+        603,
+        128803,
+        83,
+        128799,
+        18254,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n\n\n## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜ calls>\" block like the following:\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"$TOOL_NAME\">\n<｜DSML｜ parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜ parameter>\n...\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜ invoke>\n</｜DSML｜ calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>q<｜System｜>late<｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 252,
+          "end": 262
+        },
+        {
+          "start": 299,
+          "end": 309
+        },
+        {
+          "start": 318,
+          "end": 328
+        },
+        {
+          "start": 356,
+          "end": 366
+        },
+        {
+          "start": 438,
+          "end": 448
+        },
+        {
+          "start": 466,
+          "end": 476
+        },
+        {
+          "start": 486,
+          "end": 496
+        },
+        {
+          "start": 530,
+          "end": 540
+        },
+        {
+          "start": 551,
+          "end": 561
+        },
+        {
+          "start": 796,
+          "end": 803
+        },
+        {
+          "start": 853,
+          "end": 860
+        },
+        {
+          "start": 863,
+          "end": 871
+        },
+        {
+          "start": 947,
+          "end": 955
+        },
+        {
+          "start": 1231,
+          "end": 1243
+        },
+        {
+          "start": 1244,
+          "end": 1258
+        },
+        {
+          "start": 1262,
+          "end": 1274
+        },
+        {
+          "start": 1278,
+          "end": 1295
+        },
+        {
+          "start": 1295,
+          "end": 1302
+        }
+      ]
+    },
+    {
+      "name": "tools_none",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": "none",
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 151,
+          "end": 168
+        },
+        {
+          "start": 168,
+          "end": 175
+        }
+      ]
+    },
+    {
+      "name": "tools_required",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": "required",
+      "thinking": false,
+      "ids": [
+        0,
+        128799,
+        271,
+        372,
+        27193,
+        271,
+        3476,
+        611,
+        3278,
+        304,
+        260,
+        1341,
+        294,
+        6704,
+        304,
+        1694,
+        3287,
+        270,
+        3967,
+        734,
+        3417,
+        16,
+        2042,
+        588,
+        34756,
+        6704,
+        513,
+        4985,
+        260,
+        38322,
+        128825,
+        10699,
+        48902,
+        5603,
+        1277,
+        270,
+        2502,
+        979,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        84476,
+        46630,
+        4130,
+        61729,
+        35044,
+        4,
+        3418,
+        1281,
+        11476,
+        94,
+        19836,
+        3320,
+        6,
+        46630,
+        4130,
+        61729,
+        56909,
+        1718,
+        128825,
+        10767,
+        1018,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        20,
+        3816,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        4697,
+        3524,
+        8252,
+        1531,
+        366,
+        12038,
+        412,
+        344,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        11476,
+        4,
+        37419,
+        1884,
+        710,
+        915,
+        4815,
+        343,
+        62896,
+        14,
+        2631,
+        2065,
+        634,
+        14,
+        31939,
+        14,
+        8435,
+        754,
+        2281,
+        270,
+        1990,
+        295,
+        26639,
+        8786,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        19836,
+        4,
+        108526,
+        3575,
+        6892,
+        71144,
+        344,
+        22104,
+        343,
+        89944,
+        284,
+        513,
+        223,
+        128821,
+        754,
+        440,
+        74366,
+        5238,
+        782,
+        5553,
+        22805,
+        6352,
+        223,
+        128821,
+        1613,
+        128822,
+        119907,
+        1117,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        13079,
+        6922,
+        14,
+        5238,
+        6578,
+        1561,
+        223,
+        128822,
+        418,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        795,
+        17829,
+        28249,
+        13178,
+        8380,
+        271,
+        24313,
+        2852,
+        3362,
+        582,
+        12533,
+        1425,
+        1760,
+        582,
+        20855,
+        3362,
+        51624,
+        582,
+        46172,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        83,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        3831,
+        33236,
+        3476,
+        74366,
+        29851,
+        1605,
+        270,
+        3554,
+        6428,
+        4105,
+        2329,
+        305,
+        10767,
+        5815,
+        8380,
+        304,
+        34756,
+        4105,
+        10699,
+        603,
+        128803,
+        33310,
+        128804,
+        128822,
+        271,
+        30,
+        128825,
+        10699,
+        1018
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>\n\n## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜ calls>\" block like the following:\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"$TOOL_NAME\">\n<｜DSML｜ parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜ parameter>\n...\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜ invoke>\n</｜DSML｜ calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>hello<｜Assistant｜></think>\n\n<｜DSML｜ calls>\n",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 161,
+          "end": 171
+        },
+        {
+          "start": 208,
+          "end": 218
+        },
+        {
+          "start": 227,
+          "end": 237
+        },
+        {
+          "start": 265,
+          "end": 275
+        },
+        {
+          "start": 347,
+          "end": 357
+        },
+        {
+          "start": 375,
+          "end": 385
+        },
+        {
+          "start": 395,
+          "end": 405
+        },
+        {
+          "start": 439,
+          "end": 449
+        },
+        {
+          "start": 460,
+          "end": 470
+        },
+        {
+          "start": 705,
+          "end": 712
+        },
+        {
+          "start": 762,
+          "end": 769
+        },
+        {
+          "start": 772,
+          "end": 780
+        },
+        {
+          "start": 856,
+          "end": 864
+        },
+        {
+          "start": 1140,
+          "end": 1152
+        },
+        {
+          "start": 1157,
+          "end": 1174
+        },
+        {
+          "start": 1174,
+          "end": 1182
+        },
+        {
+          "start": 1185,
+          "end": 1195
+        }
+      ]
+    },
+    {
+      "name": "tools_history",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "old thought",
+          "tool_calls": [
+            {
+              "id": "c1",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{\"q\":\"one\"}"
+              }
+            },
+            {
+              "id": "c2",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{\"q\":\"two\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c2",
+          "content": "second"
+        },
+        {
+          "role": "user",
+          "content": "between"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c1",
+          "content": "first"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        86262,
+        372,
+        27193,
+        271,
+        3476,
+        611,
+        3278,
+        304,
+        260,
+        1341,
+        294,
+        6704,
+        304,
+        1694,
+        3287,
+        270,
+        3967,
+        734,
+        3417,
+        16,
+        2042,
+        588,
+        34756,
+        6704,
+        513,
+        4985,
+        260,
+        38322,
+        128825,
+        10699,
+        48902,
+        5603,
+        1277,
+        270,
+        2502,
+        979,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        84476,
+        46630,
+        4130,
+        61729,
+        35044,
+        4,
+        3418,
+        1281,
+        11476,
+        94,
+        19836,
+        3320,
+        6,
+        46630,
+        4130,
+        61729,
+        56909,
+        1718,
+        128825,
+        10767,
+        1018,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        20,
+        3816,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        4697,
+        3524,
+        8252,
+        1531,
+        366,
+        12038,
+        412,
+        344,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        11476,
+        4,
+        37419,
+        1884,
+        710,
+        915,
+        4815,
+        343,
+        62896,
+        14,
+        2631,
+        2065,
+        634,
+        14,
+        31939,
+        14,
+        8435,
+        754,
+        2281,
+        270,
+        1990,
+        295,
+        26639,
+        8786,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        19836,
+        4,
+        108526,
+        3575,
+        6892,
+        71144,
+        344,
+        22104,
+        343,
+        89944,
+        284,
+        513,
+        223,
+        128821,
+        754,
+        440,
+        74366,
+        5238,
+        782,
+        5553,
+        22805,
+        6352,
+        223,
+        128821,
+        1613,
+        128822,
+        119907,
+        1117,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        13079,
+        6922,
+        14,
+        5238,
+        6578,
+        1561,
+        223,
+        128822,
+        418,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        795,
+        17829,
+        28249,
+        13178,
+        8380,
+        271,
+        24313,
+        2852,
+        3362,
+        582,
+        12533,
+        1425,
+        1760,
+        582,
+        20855,
+        3362,
+        51624,
+        582,
+        46172,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        83,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        3831,
+        33236,
+        3476,
+        74366,
+        29851,
+        1605,
+        270,
+        3554,
+        6428,
+        4105,
+        2329,
+        305,
+        10767,
+        5815,
+        8380,
+        304,
+        34756,
+        4105,
+        10699,
+        603,
+        128803,
+        83,
+        128804,
+        128821,
+        1129,
+        3241,
+        128822,
+        271,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        1281,
+        12533,
+        1425,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        83,
+        4,
+        3418,
+        1281,
+        11476,
+        3320,
+        791,
+        1718,
+        128825,
+        10767,
+        1018,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        1281,
+        12533,
+        1425,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        83,
+        4,
+        3418,
+        1281,
+        11476,
+        3320,
+        23315,
+        1718,
+        128825,
+        10767,
+        1018,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        32,
+        1,
+        128803,
+        30,
+        72461,
+        46148,
+        32,
+        13213,
+        1718,
+        72461,
+        46148,
+        4697,
+        40188,
+        271,
+        30,
+        72461,
+        46148,
+        32,
+        10930,
+        1718,
+        72461,
+        46148,
+        32,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n\n\n## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜ calls>\" block like the following:\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"$TOOL_NAME\">\n<｜DSML｜ parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜ parameter>\n...\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜ invoke>\n</｜DSML｜ calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>q<｜Assistant｜><think>old thought</think>\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"lookup\">\n<｜DSML｜ parameter name=\"q\" string=\"true\">one</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"lookup\">\n<｜DSML｜ parameter name=\"q\" string=\"true\">two</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls><｜end▁of▁sentence｜><｜User｜><tool_result>first</tool_result>\n\nbetween\n\n<tool_result>second</tool_result><｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 252,
+          "end": 262
+        },
+        {
+          "start": 299,
+          "end": 309
+        },
+        {
+          "start": 318,
+          "end": 328
+        },
+        {
+          "start": 356,
+          "end": 366
+        },
+        {
+          "start": 438,
+          "end": 448
+        },
+        {
+          "start": 466,
+          "end": 476
+        },
+        {
+          "start": 486,
+          "end": 496
+        },
+        {
+          "start": 530,
+          "end": 540
+        },
+        {
+          "start": 551,
+          "end": 561
+        },
+        {
+          "start": 796,
+          "end": 803
+        },
+        {
+          "start": 853,
+          "end": 860
+        },
+        {
+          "start": 863,
+          "end": 871
+        },
+        {
+          "start": 947,
+          "end": 955
+        },
+        {
+          "start": 1231,
+          "end": 1243
+        },
+        {
+          "start": 1244,
+          "end": 1261
+        },
+        {
+          "start": 1261,
+          "end": 1268
+        },
+        {
+          "start": 1279,
+          "end": 1287
+        },
+        {
+          "start": 1290,
+          "end": 1300
+        },
+        {
+          "start": 1309,
+          "end": 1319
+        },
+        {
+          "start": 1343,
+          "end": 1353
+        },
+        {
+          "start": 1392,
+          "end": 1402
+        },
+        {
+          "start": 1416,
+          "end": 1426
+        },
+        {
+          "start": 1436,
+          "end": 1446
+        },
+        {
+          "start": 1470,
+          "end": 1480
+        },
+        {
+          "start": 1519,
+          "end": 1529
+        },
+        {
+          "start": 1543,
+          "end": 1553
+        },
+        {
+          "start": 1564,
+          "end": 1574
+        },
+        {
+          "start": 1581,
+          "end": 1608
+        },
+        {
+          "start": 1608,
+          "end": 1620
+        },
+        {
+          "start": 1696,
+          "end": 1713
+        },
+        {
+          "start": 1713,
+          "end": 1720
+        }
+      ]
+    },
+    {
+      "name": "invalid_arguments",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "old thought",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "[1,2]"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c",
+          "content": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        86262,
+        372,
+        27193,
+        271,
+        3476,
+        611,
+        3278,
+        304,
+        260,
+        1341,
+        294,
+        6704,
+        304,
+        1694,
+        3287,
+        270,
+        3967,
+        734,
+        3417,
+        16,
+        2042,
+        588,
+        34756,
+        6704,
+        513,
+        4985,
+        260,
+        38322,
+        128825,
+        10699,
+        48902,
+        5603,
+        1277,
+        270,
+        2502,
+        979,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        84476,
+        46630,
+        4130,
+        61729,
+        35044,
+        4,
+        3418,
+        1281,
+        11476,
+        94,
+        19836,
+        3320,
+        6,
+        46630,
+        4130,
+        61729,
+        56909,
+        1718,
+        128825,
+        10767,
+        1018,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        20,
+        3816,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        4697,
+        3524,
+        8252,
+        1531,
+        366,
+        12038,
+        412,
+        344,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        11476,
+        4,
+        37419,
+        1884,
+        710,
+        915,
+        4815,
+        343,
+        62896,
+        14,
+        2631,
+        2065,
+        634,
+        14,
+        31939,
+        14,
+        8435,
+        754,
+        2281,
+        270,
+        1990,
+        295,
+        26639,
+        8786,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        19836,
+        4,
+        108526,
+        3575,
+        6892,
+        71144,
+        344,
+        22104,
+        343,
+        89944,
+        284,
+        513,
+        223,
+        128821,
+        754,
+        440,
+        74366,
+        5238,
+        782,
+        5553,
+        22805,
+        6352,
+        223,
+        128821,
+        1613,
+        128822,
+        119907,
+        1117,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        13079,
+        6922,
+        14,
+        5238,
+        6578,
+        1561,
+        223,
+        128822,
+        418,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        795,
+        17829,
+        28249,
+        13178,
+        8380,
+        271,
+        24313,
+        2852,
+        3362,
+        582,
+        12533,
+        1425,
+        1760,
+        582,
+        20855,
+        3362,
+        51624,
+        582,
+        46172,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        83,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        3831,
+        33236,
+        3476,
+        74366,
+        29851,
+        1605,
+        270,
+        3554,
+        6428,
+        4105,
+        2329,
+        305,
+        10767,
+        5815,
+        8380,
+        304,
+        34756,
+        4105,
+        10699,
+        603,
+        128803,
+        83,
+        128804,
+        128821,
+        1129,
+        3241,
+        128822,
+        271,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        1281,
+        12533,
+        1425,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        1281,
+        83772,
+        4,
+        3418,
+        1281,
+        11476,
+        3320,
+        61,
+        19,
+        14,
+        20,
+        63,
+        1718,
+        128825,
+        10767,
+        1018,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        32,
+        1,
+        128803,
+        30,
+        72461,
+        46148,
+        32,
+        633,
+        1718,
+        72461,
+        46148,
+        32,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n\n\n## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜ calls>\" block like the following:\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"$TOOL_NAME\">\n<｜DSML｜ parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜ parameter>\n...\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜ invoke>\n</｜DSML｜ calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>q<｜Assistant｜><think>old thought</think>\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"lookup\">\n<｜DSML｜ parameter name=\"arguments\" string=\"true\">[1,2]</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls><｜end▁of▁sentence｜><｜User｜><tool_result>ok</tool_result><｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 252,
+          "end": 262
+        },
+        {
+          "start": 299,
+          "end": 309
+        },
+        {
+          "start": 318,
+          "end": 328
+        },
+        {
+          "start": 356,
+          "end": 366
+        },
+        {
+          "start": 438,
+          "end": 448
+        },
+        {
+          "start": 466,
+          "end": 476
+        },
+        {
+          "start": 486,
+          "end": 496
+        },
+        {
+          "start": 530,
+          "end": 540
+        },
+        {
+          "start": 551,
+          "end": 561
+        },
+        {
+          "start": 796,
+          "end": 803
+        },
+        {
+          "start": 853,
+          "end": 860
+        },
+        {
+          "start": 863,
+          "end": 871
+        },
+        {
+          "start": 947,
+          "end": 955
+        },
+        {
+          "start": 1231,
+          "end": 1243
+        },
+        {
+          "start": 1244,
+          "end": 1261
+        },
+        {
+          "start": 1261,
+          "end": 1268
+        },
+        {
+          "start": 1279,
+          "end": 1287
+        },
+        {
+          "start": 1290,
+          "end": 1300
+        },
+        {
+          "start": 1309,
+          "end": 1319
+        },
+        {
+          "start": 1343,
+          "end": 1353
+        },
+        {
+          "start": 1402,
+          "end": 1412
+        },
+        {
+          "start": 1426,
+          "end": 1436
+        },
+        {
+          "start": 1447,
+          "end": 1457
+        },
+        {
+          "start": 1464,
+          "end": 1491
+        },
+        {
+          "start": 1491,
+          "end": 1503
+        },
+        {
+          "start": 1532,
+          "end": 1549
+        },
+        {
+          "start": 1549,
+          "end": 1556
+        }
+      ]
+    },
+    {
+      "name": "system_tool_update",
+      "messages": [
+        {
+          "role": "system",
+          "content": "rules"
+        },
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "system",
+          "content": "new tool",
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        81443,
+        128803,
+        83,
+        128799,
+        2839,
+        4105,
+        271,
+        795,
+        28173,
+        28249,
+        13178,
+        8380,
+        271,
+        24313,
+        2852,
+        3362,
+        582,
+        12533,
+        1425,
+        1760,
+        582,
+        20855,
+        3362,
+        51624,
+        582,
+        46172,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        83,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        91428,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\nrules<｜User｜>q<｜System｜>new tool\n\n### Updated Tool Schemas\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}<｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 139,
+          "end": 151
+        },
+        {
+          "start": 152,
+          "end": 166
+        },
+        {
+          "start": 314,
+          "end": 326
+        },
+        {
+          "start": 330,
+          "end": 347
+        },
+        {
+          "start": 347,
+          "end": 354
+        }
+      ]
+    },
+    {
+      "name": "deferred_tool",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "defer_loading": true
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        86262,
+        372,
+        27193,
+        271,
+        3476,
+        611,
+        3278,
+        304,
+        260,
+        1341,
+        294,
+        6704,
+        304,
+        1694,
+        3287,
+        270,
+        3967,
+        734,
+        3417,
+        16,
+        2042,
+        588,
+        34756,
+        6704,
+        513,
+        4985,
+        260,
+        38322,
+        128825,
+        10699,
+        48902,
+        5603,
+        1277,
+        270,
+        2502,
+        979,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        84476,
+        46630,
+        4130,
+        61729,
+        35044,
+        4,
+        3418,
+        1281,
+        11476,
+        94,
+        19836,
+        3320,
+        6,
+        46630,
+        4130,
+        61729,
+        56909,
+        1718,
+        128825,
+        10767,
+        1018,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        20,
+        3816,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        4697,
+        3524,
+        8252,
+        1531,
+        366,
+        12038,
+        412,
+        344,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        11476,
+        4,
+        37419,
+        1884,
+        710,
+        915,
+        4815,
+        343,
+        62896,
+        14,
+        2631,
+        2065,
+        634,
+        14,
+        31939,
+        14,
+        8435,
+        754,
+        2281,
+        270,
+        1990,
+        295,
+        26639,
+        8786,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        19836,
+        4,
+        108526,
+        3575,
+        6892,
+        71144,
+        344,
+        22104,
+        343,
+        89944,
+        284,
+        513,
+        223,
+        128821,
+        754,
+        440,
+        74366,
+        5238,
+        782,
+        5553,
+        22805,
+        6352,
+        223,
+        128821,
+        1613,
+        128822,
+        119907,
+        1117,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        13079,
+        6922,
+        14,
+        5238,
+        6578,
+        1561,
+        223,
+        128822,
+        418,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        795,
+        17829,
+        28249,
+        13178,
+        8380,
+        13318,
+        3476,
+        74366,
+        29851,
+        1605,
+        270,
+        3554,
+        6428,
+        4105,
+        2329,
+        305,
+        10767,
+        5815,
+        8380,
+        304,
+        34756,
+        4105,
+        10699,
+        603,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n\n\n## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜ calls>\" block like the following:\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"$TOOL_NAME\">\n<｜DSML｜ parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜ parameter>\n...\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜ invoke>\n</｜DSML｜ calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 252,
+          "end": 262
+        },
+        {
+          "start": 299,
+          "end": 309
+        },
+        {
+          "start": 318,
+          "end": 328
+        },
+        {
+          "start": 356,
+          "end": 366
+        },
+        {
+          "start": 438,
+          "end": 448
+        },
+        {
+          "start": 466,
+          "end": 476
+        },
+        {
+          "start": 486,
+          "end": 496
+        },
+        {
+          "start": 530,
+          "end": 540
+        },
+        {
+          "start": 551,
+          "end": 561
+        },
+        {
+          "start": 796,
+          "end": 803
+        },
+        {
+          "start": 853,
+          "end": 860
+        },
+        {
+          "start": 863,
+          "end": 871
+        },
+        {
+          "start": 947,
+          "end": 955
+        },
+        {
+          "start": 1119,
+          "end": 1131
+        },
+        {
+          "start": 1136,
+          "end": 1153
+        },
+        {
+          "start": 1153,
+          "end": 1160
+        }
+      ]
+    },
+    {
+      "name": "json_object",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "response_format": {
+        "type": "json_object"
+      },
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        86262,
+        372,
+        17038,
+        29478,
+        979,
+        3476,
+        74366,
+        29851,
+        42917,
+        304,
+        270,
+        2502,
+        37913,
+        304,
+        20430,
+        1137,
+        24313,
+        4611,
+        3362,
+        582,
+        14479,
+        55774,
+        62773,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n\n\n## Response Format:\n\nYou MUST strictly adhere to the following schema to reply:\n{\"type\": \"json_object\"}<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 239,
+          "end": 251
+        },
+        {
+          "start": 256,
+          "end": 273
+        },
+        {
+          "start": 273,
+          "end": 280
+        }
+      ]
+    },
+    {
+      "name": "json_schema",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "answer",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        86262,
+        372,
+        27193,
+        271,
+        3476,
+        611,
+        3278,
+        304,
+        260,
+        1341,
+        294,
+        6704,
+        304,
+        1694,
+        3287,
+        270,
+        3967,
+        734,
+        3417,
+        16,
+        2042,
+        588,
+        34756,
+        6704,
+        513,
+        4985,
+        260,
+        38322,
+        128825,
+        10699,
+        48902,
+        5603,
+        1277,
+        270,
+        2502,
+        979,
+        30,
+        128825,
+        10699,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        3816,
+        30,
+        128825,
+        10767,
+        2329,
+        84476,
+        46630,
+        4130,
+        61729,
+        35044,
+        4,
+        3418,
+        1281,
+        11476,
+        94,
+        19836,
+        3320,
+        6,
+        46630,
+        4130,
+        61729,
+        56909,
+        1718,
+        128825,
+        10767,
+        1018,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        30,
+        128825,
+        34756,
+        2329,
+        84476,
+        6792,
+        5896,
+        35044,
+        20,
+        3816,
+        7835,
+        1718,
+        128825,
+        34756,
+        1018,
+        1718,
+        128825,
+        10699,
+        4697,
+        3524,
+        8252,
+        1531,
+        366,
+        12038,
+        412,
+        344,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        11476,
+        4,
+        37419,
+        1884,
+        710,
+        915,
+        4815,
+        343,
+        62896,
+        14,
+        2631,
+        2065,
+        634,
+        14,
+        31939,
+        14,
+        8435,
+        754,
+        2281,
+        270,
+        1990,
+        295,
+        26639,
+        8786,
+        305,
+        1341,
+        3608,
+        4463,
+        1281,
+        19836,
+        4,
+        108526,
+        3575,
+        6892,
+        71144,
+        344,
+        22104,
+        343,
+        89944,
+        284,
+        513,
+        223,
+        128821,
+        754,
+        440,
+        74366,
+        5238,
+        782,
+        5553,
+        22805,
+        6352,
+        223,
+        128821,
+        1613,
+        128822,
+        119907,
+        1117,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        13079,
+        6922,
+        14,
+        5238,
+        6578,
+        1561,
+        223,
+        128822,
+        418,
+        4105,
+        10699,
+        469,
+        4087,
+        4256,
+        339,
+        795,
+        17829,
+        28249,
+        13178,
+        8380,
+        271,
+        24313,
+        2852,
+        3362,
+        582,
+        12533,
+        1425,
+        1760,
+        582,
+        20855,
+        3362,
+        51624,
+        582,
+        46172,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        83,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        3831,
+        33236,
+        3476,
+        74366,
+        29851,
+        1605,
+        270,
+        3554,
+        6428,
+        4105,
+        2329,
+        305,
+        10767,
+        5815,
+        8380,
+        304,
+        34756,
+        4105,
+        10699,
+        22287,
+        372,
+        17038,
+        29478,
+        979,
+        3476,
+        74366,
+        29851,
+        42917,
+        304,
+        270,
+        2502,
+        37913,
+        304,
+        20430,
+        1137,
+        24313,
+        4611,
+        3362,
+        582,
+        10325,
+        1760,
+        582,
+        68838,
+        3362,
+        28612,
+        19995,
+        3362,
+        28612,
+        4611,
+        3362,
+        582,
+        4463,
+        4,
+        41653,
+        128803,
+        33310,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n\n\n## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜ calls>\" block like the following:\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"$TOOL_NAME\">\n<｜DSML｜ parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜ parameter>\n...\n</｜DSML｜ invoke>\n<｜DSML｜ invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜ invoke>\n</｜DSML｜ calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n\n\n## Response Format:\n\nYou MUST strictly adhere to the following schema to reply:\n{\"type\": \"object\", \"properties\": {\"answer\": {\"type\": \"string\"}}}<｜User｜>hello<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 252,
+          "end": 262
+        },
+        {
+          "start": 299,
+          "end": 309
+        },
+        {
+          "start": 318,
+          "end": 328
+        },
+        {
+          "start": 356,
+          "end": 366
+        },
+        {
+          "start": 438,
+          "end": 448
+        },
+        {
+          "start": 466,
+          "end": 476
+        },
+        {
+          "start": 486,
+          "end": 496
+        },
+        {
+          "start": 530,
+          "end": 540
+        },
+        {
+          "start": 551,
+          "end": 561
+        },
+        {
+          "start": 796,
+          "end": 803
+        },
+        {
+          "start": 853,
+          "end": 860
+        },
+        {
+          "start": 863,
+          "end": 871
+        },
+        {
+          "start": 947,
+          "end": 955
+        },
+        {
+          "start": 1377,
+          "end": 1389
+        },
+        {
+          "start": 1394,
+          "end": 1411
+        },
+        {
+          "start": 1411,
+          "end": 1418
+        }
+      ]
+    },
+    {
+      "name": "literal_image_among_parts",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <｜deepseek_image｜>"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "https://example.test/i.png"
+              }
+            },
+            {
+              "type": "text",
+              "text": "<｜deepseek_image｜> again"
+            }
+          ]
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        119734,
+        818,
+        28217,
+        60861,
+        121559,
+        41629,
+        28217,
+        4697,
+        129264,
+        271,
+        30,
+        28217,
+        60861,
+        121559,
+        41629,
+        28217,
+        32,
+        1820,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>literal <｜deepseek_image｜>\n\n<｜deepseek_image｜>\n\n<｜deepseek_image｜> again<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 178,
+          "end": 200
+        },
+        {
+          "start": 230,
+          "end": 247
+        },
+        {
+          "start": 247,
+          "end": 254
+        }
+      ]
+    },
+    {
+      "name": "assistant_parts",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "a"
+            },
+            {
+              "type": "text",
+              "text": "b"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "ids": [
+        0,
+        128799,
+        77666,
+        288,
+        9504,
+        482,
+        28,
+        223,
+        2402,
+        343,
+        16801,
+        223,
+        19,
+        15,
+        1457,
+        14,
+        270,
+        4077,
+        270,
+        1990,
+        14,
+        270,
+        850,
+        15146,
+        270,
+        22805,
+        868,
+        128803,
+        83,
+        128804,
+        128822,
+        67,
+        271,
+        68,
+        1,
+        128803,
+        6695,
+        128804,
+        128821
+      ],
+      "text": "<｜begin▁of▁sentence｜><｜System｜>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<｜User｜>q<｜Assistant｜></think>a\n\nb<｜end▁of▁sentence｜><｜User｜>next<｜Assistant｜><think>",
+      "special_ranges": [
+        {
+          "start": 0,
+          "end": 29
+        },
+        {
+          "start": 29,
+          "end": 43
+        },
+        {
+          "start": 134,
+          "end": 146
+        },
+        {
+          "start": 147,
+          "end": 164
+        },
+        {
+          "start": 164,
+          "end": 172
+        },
+        {
+          "start": 176,
+          "end": 203
+        },
+        {
+          "start": 203,
+          "end": 215
+        },
+        {
+          "start": 219,
+          "end": 236
+        },
+        {
+          "start": 236,
+          "end": 243
+        }
+      ]
+    }
+  ],
+  "tokenizer_sha256": "c90dfa01249db1be4245780a052ede752e1361c612ac6d08e2bdada7d599476b"
+}

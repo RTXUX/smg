@@ -16,7 +16,10 @@ use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use serde_json::{json, Value};
 use thiserror::Error;
 
-use super::marks::{self, control};
+use super::{
+    marks::{self, control},
+    Prompt,
+};
 
 // ---------------------------------------------------------------------------
 // The family's special tokens, shared by the V3.2, V4 and V4.1 renderers (each
@@ -458,13 +461,6 @@ pub(super) fn tool_schemas(tools: &[Value]) -> String {
     schemas.join("\n")
 }
 
-/// Python's `if msg.get("tools"):` — absent, null and `[]` are all falsy.
-pub(super) fn has_tools(msg: &Value) -> bool {
-    msg.get("tools")
-        .and_then(|v| v.as_array())
-        .is_some_and(|tools| !tools.is_empty())
-}
-
 /// The V4 family's `TOOLS_TEMPLATE`, one text for both dialects: `block` is
 /// the tool-calls block name (`tool_calls` for V4, ` calls` for V4.1) and
 /// `tags` the invoke and parameter tags, around the `tool_schemas` lines.
@@ -502,6 +498,66 @@ Otherwise, output directly after {tend} with tool calls or final response.
 You MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.
 "
     )
+}
+
+fn push_dsml(prompt: &mut Prompt, text: &str) {
+    let mut specials: Vec<(usize, &str)> = [DSML_TOKEN, THINKING_START_TOKEN, THINKING_END_TOKEN]
+        .into_iter()
+        .flat_map(|token| {
+            text.match_indices(token)
+                .map(move |(start, _)| (start, token))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    specials.sort_by_key(|(start, _)| *start);
+    let mut cursor = 0;
+    for (start, sigil) in specials {
+        prompt.push_plain(&text[cursor..start]);
+        prompt.push_special(sigil);
+        cursor = start + sigil.len();
+    }
+    prompt.push_plain(&text[cursor..]);
+}
+
+pub(super) fn write_v4_tools_template(
+    prompt: &mut Prompt,
+    block: &str,
+    tags: &DsmlTags,
+    tool_schemas: &str,
+) {
+    let dsml = DSML_TOKEN;
+    let invoke = tags.invoke;
+    let parameter = tags.parameter;
+    let tstart = THINKING_START_TOKEN;
+    let tend = THINKING_END_TOKEN;
+    let instructions = format!(
+"## Tools
+
+You have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<{dsml}{block}>\" block like the following:
+
+<{dsml}{block}>
+<{dsml}{invoke} name=\"$TOOL_NAME\">
+<{dsml}{parameter} name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</{dsml}{parameter}>
+...
+</{dsml}{invoke}>
+<{dsml}{invoke} name=\"$TOOL_NAME2\">
+...
+</{dsml}{invoke}>
+</{dsml}{block}>
+
+String parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.
+
+If thinking_mode is enabled (triggered by {tstart}), you MUST output your complete reasoning inside {tstart}...{tend} BEFORE any tool calls or final response.
+
+Otherwise, output directly after {tend} with tool calls or final response.
+
+### Available Tool Schemas
+
+"
+    );
+    push_dsml(prompt, &instructions);
+    prompt.push_plain(tool_schemas);
+    prompt.push_plain("\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n");
 }
 
 #[cfg(test)]

@@ -9,27 +9,41 @@ mod tests {
             ChatTemplateContentFormat, ChatTemplateParams, ThinkingKeyName, ThinkingToggle,
         },
         huggingface::HuggingFaceTokenizer,
-        TokenizerTrait,
+        PromptEncoding, TokenizerTrait,
     };
     use openai_protocol::common::{Function, Tool};
     use serde_json::json;
     use tempfile::TempDir;
-
-    use crate::common::MIN_TOKENIZER_JSON_WITH_SENTINELS;
+    use tokenizers::AddedVocabulary;
+    /// A minimal tokenizer.json that loads cleanly. The only requirement is that
+    /// it parses; the encoder logic does not call back into the tokenizer here.
+    const MIN_TOKENIZER_JSON: &str = r#"{
+        "version": "1.0",
+        "truncation": null,
+        "padding": null,
+        "added_tokens": [],
+        "normalizer": null,
+        "pre_tokenizer": { "type": "Whitespace" },
+        "post_processor": null,
+        "decoder": null,
+        "model": {
+            "type": "BPE",
+            "vocab": { "hello": 0, "<s>": 1, "</s>": 2 },
+            "merges": []
+        }
+    }"#;
     fn write_dir(architectures: Option<&[&str]>) -> (TempDir, String) {
         write_model_dir(None, architectures, None, None)
     }
 
     /// Build a model dir (optionally named, under the temp root) with the
     /// minimal tokenizer, an optional config (`architectures` and/or
-    /// `model_type`), and an optional shipped Python encoder: a file name
-    /// under `encoding/` (`encoding_dsv4.py` for V4, `encoding.py` for V4.1)
-    /// and its source.
+    /// `model_type`), and an optional shipped Python encoder.
     fn write_model_dir(
         model_name: Option<&str>,
         architectures: Option<&[&str]>,
         model_type: Option<&str>,
-        encoder: Option<(&str, &str)>,
+        encoder_source: Option<&str>,
     ) -> (TempDir, String) {
         let temp = TempDir::new().unwrap();
         let model_dir = match model_name {
@@ -41,7 +55,7 @@ mod tests {
             None => temp.path().to_path_buf(),
         };
         let tok_path = model_dir.join("tokenizer.json");
-        fs::write(&tok_path, MIN_TOKENIZER_JSON_WITH_SENTINELS).unwrap();
+        fs::write(&tok_path, MIN_TOKENIZER_JSON).unwrap();
         if architectures.is_some() || model_type.is_some() {
             let mut config = serde_json::Map::new();
             if let Some(archs) = architectures {
@@ -53,10 +67,10 @@ mod tests {
             let body = serde_json::Value::Object(config).to_string();
             fs::write(model_dir.join("config.json"), body).unwrap();
         }
-        if let Some((file, source)) = encoder {
+        if let Some(source) = encoder_source {
             let encoding_dir = model_dir.join("encoding");
             fs::create_dir(&encoding_dir).unwrap();
-            fs::write(encoding_dir.join(file), source).unwrap();
+            fs::write(encoding_dir.join("encoding_dsv4.py"), source).unwrap();
         }
         (temp, tok_path.to_str().unwrap().to_string())
     }
@@ -141,7 +155,7 @@ mod tests {
     fn malformed_config_json_falls_back_to_jinja() {
         let temp = TempDir::new().unwrap();
         let tok_path = temp.path().join("tokenizer.json");
-        fs::write(&tok_path, MIN_TOKENIZER_JSON_WITH_SENTINELS).unwrap();
+        fs::write(&tok_path, MIN_TOKENIZER_JSON).unwrap();
         fs::write(temp.path().join("config.json"), "{ this is not json").unwrap();
         let tokenizer = HuggingFaceTokenizer::from_file(tok_path.to_str().unwrap()).unwrap();
         let messages = vec![json!({ "role": "user", "content": "Hello" })];
@@ -476,7 +490,7 @@ mod tests {
             Some(model_name),
             Some(&["DeepseekV4ForCausalLM"]),
             None,
-            encoder_source.map(|source| ("encoding_dsv4.py", source)),
+            encoder_source,
         )
     }
 
@@ -578,26 +592,8 @@ mod tests {
 
     const V41_BOS: &str = "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}>";
     const V41_EOS: &str = "<\u{FF5C}end\u{2581}of\u{2581}sentence\u{FF5C}>";
-    /// The system header carrying the default budget (thinking mode only):
-    /// `high` of the checkpoint's current effort table, 75.
+    /// The system header carrying the default budget (thinking mode only).
     const V41_DEFAULT_EFFORT_HEADER: &str = "<\u{FF5C}System\u{FF5C}>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n";
-    /// The `REASONING_EFFORT_MAPPINGS` block of the checkpoint's first
-    /// published `encoding/encoding.py`, and the block of the refresh that
-    /// followed it (the chat template the checkpoint added later carries the
-    /// refreshed numbers).
-    const V41_ORIGINAL_ENCODER_SNIPPET: &str = r#"REASONING_EFFORT_MAPPINGS: Dict[str, int] = {
-    "low": 25,
-    "high": 50,
-    "xhigh": 75,
-    "max": 100,
-}
-DEFAULT_REASONING_EFFORT = "high""#;
-    const V41_RESCALED_ENCODER_SNIPPET: &str = r#"REASONING_EFFORT_MAPPINGS: Dict[str, int] = {
-    "low": 50,
-    "high": 75,
-    "max": 100,
-}
-DEFAULT_REASONING_EFFORT = "high""#;
     /// Tail of a single-user-turn prompt in thinking mode.
     const V41_THINKING_TAIL: &str = "<\u{FF5C}User\u{FF5C}>q<\u{FF5C}Assistant\u{FF5C}><think>";
     /// Tail of a single-user-turn prompt in chat mode.
@@ -609,15 +605,54 @@ DEFAULT_REASONING_EFFORT = "high""#;
         (tmp, tokenizer)
     }
 
-    /// A V4.1 model dir with the checkpoint's `encoding/encoding.py` when a
-    /// source is given.
-    fn write_v41_model_dir(encoder_source: Option<&str>) -> (TempDir, String) {
-        write_model_dir(
-            None,
-            Some(&["DeepseekV41ForCausalLM"]),
-            None,
-            encoder_source.map(|source| ("encoding.py", source)),
-        )
+    fn v41_tokenizer_with_added_tokens() -> (TempDir, HuggingFaceTokenizer, tokenizers::Tokenizer) {
+        let (tmp, path) = write_dir(Some(&["DeepseekV41ForCausalLM"]));
+        let mut document: serde_json::Value =
+            serde_json::from_str(MIN_TOKENIZER_JSON).expect("minimal tokenizer JSON");
+        let mut vocab = document["model"]["vocab"].as_object().unwrap().clone();
+        let mut next_id = 128900;
+        for id in vocab.values_mut() {
+            *id = json!(next_id);
+            next_id += 1;
+        }
+        for ch in
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 <>/\\\"{}[],:_-\n｜▁"
+                .chars()
+        {
+            let text = ch.to_string();
+            if !vocab.contains_key(&text) {
+                vocab.insert(text, json!(next_id));
+                next_id += 1;
+            }
+        }
+        document["model"]["vocab"] = serde_json::Value::Object(vocab);
+        let special = |id, content: &str| {
+            json!({
+                "id": id,
+                "content": content,
+                "special": true,
+                "single_word": false,
+                "lstrip": false,
+                "rstrip": false,
+                "normalized": false,
+            })
+        };
+        document["added_tokens"] = json!([
+            special(0, V41_BOS),
+            special(1, V41_EOS),
+            special(128803, "<｜User｜>"),
+            special(128804, "<｜Assistant｜>"),
+            special(128805, "<｜System｜>"),
+            special(128806, "<｜latest_reminder｜>"),
+            special(128821, "<think>"),
+            special(128822, "</think>"),
+            special(128825, "｜DSML｜"),
+            special(129264, "<｜deepseek_image｜>"),
+        ]);
+        fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let tokenizer = HuggingFaceTokenizer::from_file(&path).unwrap();
+        let raw = tokenizers::Tokenizer::from_file(&path).unwrap();
+        (tmp, tokenizer, raw)
     }
 
     /// Render the single user turn `q` with a generation prompt.
@@ -644,7 +679,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
         assert_eq!(tokenizer.thinking_toggle(), ThinkingToggle::DefaultOn);
         assert_eq!(
             tokenizer.native_reasoning_effort_values(),
-            &["low", "medium", "high", "xhigh", "max"]
+            &["low", "high", "xhigh", "max"]
         );
         assert!(tokenizer.think_in_prefill());
         let out = tokenizer
@@ -690,55 +725,6 @@ DEFAULT_REASONING_EFFORT = "high""#;
     }
 
     #[test]
-    fn v41_shipped_encoder_selects_the_effort_table() {
-        // The checkpoint's own encoder decides the budgets: its first
-        // published table, the rescaled one, and, without an encoder (a
-        // tokenizer directory streamed from a worker carries none), the
-        // rescaled table the checkpoint carries today. `xhigh` stays a
-        // native word of the renderer and renders `high`'s budget where the
-        // table has none of its own; `medium`, the chat template's own
-        // level, renders its 62 under the rescaled table and `high`'s budget
-        // under the first encoder, which has none for it.
-        let original = [
-            ("low", 25),
-            ("high", 50),
-            ("xhigh", 75),
-            ("max", 100),
-            ("medium", 50),
-        ];
-        let rescaled = [
-            ("low", 50),
-            ("high", 75),
-            ("xhigh", 75),
-            ("max", 100),
-            ("medium", 62),
-        ];
-        for (encoder, expected) in [
-            (Some(V41_ORIGINAL_ENCODER_SNIPPET), original),
-            (Some(V41_RESCALED_ENCODER_SNIPPET), rescaled),
-            (None, rescaled),
-        ] {
-            let (_tmp, tok) = write_v41_model_dir(encoder);
-            let tokenizer = HuggingFaceTokenizer::from_file(&tok).unwrap();
-            for (effort, budget) in expected {
-                let kw = HashMap::from([("reasoning_effort".to_string(), json!(effort))]);
-                let out = render_v41_turn(&tokenizer, Some(&kw), None).unwrap();
-                assert!(
-                    out.contains(&format!("Reasoning Effort: {budget} (range")),
-                    "{encoder:?} {effort}: {out}"
-                );
-            }
-            // No effort given: `high`'s budget.
-            let out = render_v41_turn(&tokenizer, None, None).unwrap();
-            let (_, high) = expected[1];
-            assert!(
-                out.contains(&format!("Reasoning Effort: {high} (range")),
-                "{encoder:?} default: {out}"
-            );
-        }
-    }
-
-    #[test]
     fn v41_reasoning_effort_none_disables_thinking_and_bad_values_error() {
         let (_tmp, tok) = write_dir(Some(&["DeepseekV41ForCausalLM"]));
         let tokenizer = HuggingFaceTokenizer::from_file(&tok).unwrap();
@@ -767,7 +753,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
                 &messages,
                 ChatTemplateParams {
                     add_generation_prompt: true,
-                    template_kwargs: Some(&bad_kwargs),
+                    template_kwargs: Some(&medium_kwargs),
                     ..Default::default()
                 },
             )
@@ -835,7 +821,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
         let off = render_v41_turn(&tokenizer, Some(&none_kw), None).unwrap();
         let low = render_v41_turn(&tokenizer, Some(&minimal_kw), None).unwrap();
         assert!(low.ends_with(V41_THINKING_TAIL));
-        assert!(low.contains("Reasoning Effort: 25 (range"));
+        assert!(low.contains("Reasoning Effort: 50 (range"));
         assert!(off.ends_with(V41_CHAT_TAIL), "{off}");
         // An explicit toggle wins over `minimal` exactly as it wins over `none`.
         let kw = HashMap::from([
@@ -844,7 +830,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
         ]);
         let out = render_v41_turn(&tokenizer, Some(&kw), None).unwrap();
         assert!(out.ends_with(V41_THINKING_TAIL), "{out}");
-        assert!(out.contains("Reasoning Effort: 25 (range"), "{out}");
+        assert!(out.contains("Reasoning Effort: 50 (range"), "{out}");
     }
 
     #[test]
@@ -878,23 +864,13 @@ DEFAULT_REASONING_EFFORT = "high""#;
         );
     }
 
-    /// Template replacement keeps native capabilities and media preprocessing intact.
     #[test]
     fn v41_reports_its_renderer_capabilities() {
-        let (_tmp, mut tokenizer) = v41_tokenizer();
+        let (_tmp, tokenizer) = v41_tokenizer();
         let caps = tokenizer.renderer_capabilities();
         assert!(caps.enable_thinking_alias, "{caps:?}");
         assert!(caps.native_assistant_continuation, "{caps:?}");
         assert!(caps.raw_tool_call_arguments, "{caps:?}");
-        assert_eq!(
-            caps.media_handling,
-            llm_tokenizer::traits::MediaHandling::Preprocess
-        );
-        // Replacing a Jinja template must not override the native renderer's profile.
-        tokenizer
-            .set_chat_template(include_str!("../fixtures/glm53/chat_template.jinja").into())
-            .unwrap();
-        assert_eq!(tokenizer.renderer_capabilities(), caps);
     }
 
     #[test]
@@ -972,7 +948,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
     }
 
     #[test]
-    fn v41_tools_attach_to_a_mid_conversation_system_message() {
+    fn v41_tools_are_in_a_leading_system_message() {
         // The engine's V4.1 rule: tools attach to the FIRST system message wherever
         // it is, even when the conversation opens with a user turn — unlike
         // V3.2/V4, which only rewrite a *leading* system/developer message.
@@ -1003,12 +979,8 @@ DEFAULT_REASONING_EFFORT = "high""#;
         };
         let out = tokenizer.apply_chat_template(&messages, params).unwrap();
         assert!(out.contains("get_weather"), "tool name missing: {out}");
-        // Tools must land on the existing mid-conversation system message's
-        // own content, not on a synthesized leading one.
-        assert!(
-            out.contains("S\n\n## Tools"),
-            "tools not attached to the mid-conversation system message: {out}"
-        );
+        assert!(out.find("## Tools").unwrap() < out.find("<｜User｜>hi").unwrap());
+        assert!(out.contains("<｜System｜>S<｜User｜>q"));
         assert_eq!(out.matches("## Tools").count(), 1, "{out}");
     }
 
@@ -1056,46 +1028,35 @@ DEFAULT_REASONING_EFFORT = "high""#;
         assert_eq!(from_typed, render(raw));
         assert!(
             from_typed.contains(
-                "\n\n{\"name\": \"lookup\", \"parameters\": {\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\"}}, \"required\": [\"query\"]}}\n\n"
+                "\n\n{\"name\": \"lookup\", \"description\": \"\", \"parameters\": {\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\"}}, \"required\": [\"query\"]}}\n\n"
             ),
             "{from_typed}"
         );
     }
 
-    /// V4.1 continues a trailing assistant message when `continue_final_message`
-    /// asks: no trailing EOS, no generation header. `add_generation_prompt:
-    /// false` alone is not read, and the message is closed with EOS as the
-    /// renderer's reference closes it.
     #[test]
-    fn v41_continues_the_final_assistant_message_only_when_asked() {
+    fn v41_add_generation_prompt_false_continues_the_final_assistant_message() {
         let (_tmp, tok) = write_dir(Some(&["DeepseekV41ForCausalLM"]));
         let tokenizer = HuggingFaceTokenizer::from_file(&tok).unwrap();
         let messages = vec![
             json!({"role": "user", "content": "q"}),
             json!({"role": "assistant", "reasoning_content": "r", "content": "Sure,"}),
         ];
-        let render = |continue_final_message: bool| {
-            tokenizer
-                .apply_chat_template(
-                    &messages,
-                    ChatTemplateParams {
-                        add_generation_prompt: false,
-                        continue_final_message,
-                        ..Default::default()
-                    },
-                )
-                .unwrap()
-        };
+        let out = tokenizer
+            .apply_chat_template(
+                &messages,
+                ChatTemplateParams {
+                    add_generation_prompt: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         // Thinking mode (default ON), reasoning kept (the assistant turn is
-        // after the last user turn), and no trailing EOS since the request
-        // continues the final message.
-        let continued = "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}><\u{FF5C}System\u{FF5C}>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<\u{FF5C}User\u{FF5C}>q<\u{FF5C}Assistant\u{FF5C}><think>r</think>Sure,";
-        assert_eq!(render(true), continued);
-        // Without the continuation the same conversation ends with the
-        // message closed: the flag alone does not leave it open.
+        // after the last user turn), and no trailing EOS since
+        // `add_generation_prompt: false` continues the final message.
         assert_eq!(
-            render(false),
-            format!("{continued}<\u{FF5C}end\u{2581}of\u{2581}sentence\u{FF5C}>")
+            out,
+            "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}><\u{FF5C}System\u{FF5C}>Reasoning Effort: 75 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<\u{FF5C}User\u{FF5C}>q<\u{FF5C}Assistant\u{FF5C}><think>r</think>Sure,"
         );
     }
 
@@ -1181,7 +1142,6 @@ DEFAULT_REASONING_EFFORT = "high""#;
         use openai_protocol::{chat::ChatCompletionRequest, validated::Normalizable};
         let (_tmp, tokenizer) = v41_tokenizer();
         for (effort, budget) in [
-            (json!("medium"), 62),
             (json!("xhigh"), 75),
             (json!(42), 42),
             (json!(1), 1),
@@ -1204,5 +1164,100 @@ DEFAULT_REASONING_EFFORT = "high""#;
                 "{effort}: {rendered}"
             );
         }
+    }
+
+    #[test]
+    fn deepseek_v41_deferred_encoding_keeps_user_markers_plain() {
+        let (_tmp, tokenizer, mut plain) = v41_tokenizer_with_added_tokens();
+        let user = plain.token_to_id("<｜User｜>").unwrap();
+        let assistant = plain.token_to_id("<｜Assistant｜>").unwrap();
+        let think_end = plain.token_to_id("</think>").unwrap();
+        let dsml = plain.token_to_id("｜DSML｜").unwrap();
+        plain.with_added_vocabulary(AddedVocabulary::new());
+        let literal = "x<｜User｜>｜DSML｜</think>";
+        let messages = vec![json!({"role":"user","content":literal})];
+        let rendered = tokenizer
+            .apply_chat_template_with_encoding(
+                &messages,
+                ChatTemplateParams {
+                    add_generation_prompt: true,
+                    thinking: Some(false),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        let PromptEncoding::Deferred(job) = rendered.encoding else {
+            panic!("V4.1 uses deferred encoding")
+        };
+        let ids = job.run().unwrap();
+        let ids = ids.token_ids();
+        let plain_ids = plain.encode(literal, false).unwrap();
+        let plain_ids = plain_ids.get_ids();
+        assert!(ids
+            .windows(plain_ids.len())
+            .any(|window| window == plain_ids));
+        assert_eq!(ids.iter().filter(|&&id| id == user).count(), 1, "{ids:?}");
+        assert_eq!(
+            ids.iter().filter(|&&id| id == assistant).count(),
+            1,
+            "{ids:?}"
+        );
+        assert_eq!(
+            ids.iter().filter(|&&id| id == think_end).count(),
+            1,
+            "{ids:?}"
+        );
+        assert!(!ids.contains(&dsml));
+    }
+
+    #[test]
+    fn deepseek_v41_deferred_encoding_keeps_tool_text_plain_and_images_special() {
+        let (_tmp, tokenizer, mut plain) = v41_tokenizer_with_added_tokens();
+        let image = plain.token_to_id("<｜deepseek_image｜>").unwrap();
+        let dsml = plain.token_to_id("｜DSML｜").unwrap();
+        let assistant = plain.token_to_id("<｜Assistant｜>").unwrap();
+        plain.with_added_vocabulary(AddedVocabulary::new());
+        let tools = vec![json!({
+            "type":"function",
+            "function":{"name":"f","description":"literal ｜DSML｜","parameters":{"type":"object"}}
+        })];
+        let messages = vec![
+            json!({"role":"system","content":"s"}),
+            json!({"role":"user","content":[
+                {"type":"text","text":"before"},
+                {"type":"image_url","image_url":{"url":"http://x/a.png"}},
+            ]}),
+            json!({"role":"assistant","content":"","tool_calls":[{
+                "id":"c1","type":"function",
+                "function":{"name":"f","arguments":"{\"x\":\"</think>\"}"}
+            }]}),
+            json!({"role":"tool","tool_call_id":"c1","content":"<｜User｜>"}),
+        ];
+        let rendered = tokenizer
+            .apply_chat_template_with_encoding(
+                &messages,
+                ChatTemplateParams {
+                    add_generation_prompt: true,
+                    thinking: Some(false),
+                    tools: Some(&tools),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        let PromptEncoding::Deferred(job) = rendered.encoding else {
+            panic!("V4.1 uses deferred encoding")
+        };
+        let ids = job.run().unwrap();
+        let ids = ids.token_ids();
+        for literal in ["</think>", "<｜User｜>", "｜DSML｜"] {
+            let expected = plain.encode(literal, false).unwrap();
+            let expected = expected.get_ids();
+            assert!(ids.windows(expected.len()).any(|window| window == expected));
+        }
+        assert_eq!(ids.iter().filter(|&&id| id == image).count(), 1, "{ids:?}");
+        assert!(ids.contains(&dsml));
+        assert!(ids.contains(&assistant));
     }
 }

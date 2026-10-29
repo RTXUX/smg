@@ -57,6 +57,14 @@ pub enum MediaHandling {
 pub struct RendererCapabilities {
     /// Resolved when the renderer is loaded or its template is replaced.
     pub media_handling: MediaHandling,
+    /// Prefix rendered before generation for `tool_choice: required`. Its
+    /// grammar must start after this prefix, which is already in the prompt.
+    pub required_tool_prefix: Option<&'static str>,
+    /// Separator between text/thinking blocks flattened by the Messages
+    /// adapter. `None` preserves the generic adapter's existing separators.
+    pub message_text_separator: Option<&'static str>,
+    /// Keep media among text parts at the positions supplied by the client.
+    pub authored_media_order: bool,
     /// The renderer reads `enable_thinking` as an alias of its thinking key.
     pub enable_thinking_alias: bool,
     /// With `add_generation_prompt` false and `continue_final_message` set

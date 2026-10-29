@@ -1,0 +1,688 @@
+{
+  "source": "deepseek-recipe",
+  "revision": "935817c66f5d6e64838f419692545f06787e485f",
+  "image_token": "<｜deepseek_image｜>",
+  "cases": [
+    {
+      "name": "default",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ]
+    },
+    {
+      "name": "effort_low",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "low"
+    },
+    {
+      "name": "effort_high",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "high"
+    },
+    {
+      "name": "effort_xhigh",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "xhigh"
+    },
+    {
+      "name": "effort_max",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "effort": "max"
+    },
+    {
+      "name": "chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "thinking": false
+    },
+    {
+      "name": "initial_system",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Rules"
+        },
+        {
+          "role": "user",
+          "content": "Question"
+        }
+      ]
+    },
+    {
+      "name": "consecutive_users",
+      "messages": [
+        {
+          "role": "user",
+          "content": "first"
+        },
+        {
+          "role": "user",
+          "content": "second"
+        }
+      ]
+    },
+    {
+      "name": "mid_system",
+      "messages": [
+        {
+          "role": "user",
+          "content": "question"
+        },
+        {
+          "role": "assistant",
+          "content": "answer",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "system",
+          "content": "New rules"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "empty_assistant",
+      "messages": [
+        {
+          "role": "user",
+          "content": "question"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": ""
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "history_drops_thinking",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "a",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "assistant_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "Sure",
+          "reasoning_content": "old thought",
+          "prefix": true
+        }
+      ]
+    },
+    {
+      "name": "reasoning_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "Continue thinking",
+          "prefix": true
+        }
+      ]
+    },
+    {
+      "name": "empty_reasoning_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "",
+          "prefix": true
+        }
+      ]
+    },
+    {
+      "name": "chat_prefix",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "Sure",
+          "reasoning_content": "old thought",
+          "prefix": true
+        }
+      ],
+      "thinking": false
+    },
+    {
+      "name": "system_at_end",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "a",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "system",
+          "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "reminders",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "latest_reminder",
+          "content": "remember"
+        },
+        {
+          "role": "latest_reminder",
+          "content": "dropped"
+        }
+      ]
+    },
+    {
+      "name": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "look"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "https://example.test/i.png"
+              }
+            },
+            {
+              "type": "text",
+              "text": "now"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "literal_markers",
+      "messages": [
+        {
+          "role": "user",
+          "content": "literal <think> <｜User｜> ｜DSML｜"
+        },
+        {
+          "role": "assistant",
+          "content": "literal </think> <｜Assistant｜>",
+          "reasoning_content": "literal <think>"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "grounding",
+      "messages": [
+        {
+          "role": "user",
+          "content": "where"
+        },
+        {
+          "role": "assistant",
+          "content": "<｜ref｜>object<｜/ref｜><｜box｜>1,2<｜/box｜>",
+          "reasoning_content": "old thought"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "tools",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "tools_insert_leading_system",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "system",
+          "content": "late"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "tools_none",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": "none"
+    },
+    {
+      "name": "tools_required",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": "required",
+      "thinking": false
+    },
+    {
+      "name": "tools_history",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "old thought",
+          "tool_calls": [
+            {
+              "id": "c1",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{\"q\":\"one\"}"
+              }
+            },
+            {
+              "id": "c2",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{\"q\":\"two\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c2",
+          "content": "second"
+        },
+        {
+          "role": "user",
+          "content": "between"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c1",
+          "content": "first"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "invalid_arguments",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "old thought",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "[1,2]"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c",
+          "content": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "system_tool_update",
+      "messages": [
+        {
+          "role": "system",
+          "content": "rules"
+        },
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "system",
+          "content": "new tool",
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ]
+    },
+    {
+      "name": "deferred_tool",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "defer_loading": true
+        }
+      ]
+    },
+    {
+      "name": "json_object",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "response_format": {
+        "type": "json_object"
+      }
+    },
+    {
+      "name": "json_schema",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "answer",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "literal_image_among_parts",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <｜deepseek_image｜>"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "https://example.test/i.png"
+              }
+            },
+            {
+              "type": "text",
+              "text": "<｜deepseek_image｜> again"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "assistant_parts",
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "a"
+            },
+            {
+              "type": "text",
+              "text": "b"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "next"
+        }
+      ]
+    }
+  ]
+}

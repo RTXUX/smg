@@ -55,7 +55,7 @@ enum Renderer {
     Jinja,
     DeepseekV32,
     DeepseekV4(deepseek_v4::EffortEncoding),
-    DeepseekV41(deepseek_v41::EffortTable),
+    DeepseekV41,
     Glm53(glm53::Template),
 }
 
@@ -68,7 +68,7 @@ impl Renderer {
             Self::Jinja | Self::Glm53(_) => None,
             Self::DeepseekV32 => Some(deepseek_v32::PROFILE),
             Self::DeepseekV4(encoding) => Some(encoding.profile()),
-            Self::DeepseekV41(_) => Some(deepseek_v41::PROFILE),
+            Self::DeepseekV41 => Some(deepseek_v41::PROFILE),
         }
     }
 }
@@ -1810,7 +1810,7 @@ impl HuggingFaceTokenizer {
             )),
             Renderer::DeepseekV32 => apply_deepseek_v32(messages, &params),
             Renderer::DeepseekV4(encoding) => apply_deepseek_v4(messages, &params, encoding),
-            Renderer::DeepseekV41(table) => apply_deepseek_v41(messages, &params, table),
+            Renderer::DeepseekV41 => apply_deepseek_v41(messages, &params),
         }
     }
 
@@ -1822,22 +1822,20 @@ impl HuggingFaceTokenizer {
         params: ChatTemplateParams,
         assistant_prefix: Option<&str>,
     ) -> Result<ChatTemplateOutput> {
-        // The native encoders read neither flag, as the engines' own encoders
-        // do, and the flags report what the renderer wrote: a continuation by
-        // the V4.1 encoder alone, on a trailing assistant message, when the
-        // request asks (`wo_eos`; V4 closes it with EOS); the header read from
-        // the marked render for V4 and V4.1 (their encoders' final transition,
-        // after their own preprocessing), and from the final message's role
-        // for V3.2, which writes the header inside every user, developer and
-        // tool-result render, before any trailing system text.
-        let continued_final_message = matches!(self.renderer, Renderer::DeepseekV41(_))
-            && continues_final_assistant_message(messages, &params);
+        // V4.1 reports the recipe's assistant continuation; V4 closes it
+        // with EOS. Read the V4/V4.1 generation header from the marked
+        // rendering. V3.2 writes its header inside each user, developer or
+        // tool-result turn, before any trailing system text.
+        let continued_final_message = matches!(self.renderer, Renderer::DeepseekV41)
+            && final_message_is_assistant(messages)
+            && (!params.add_generation_prompt
+                || messages
+                    .last()
+                    .is_some_and(|message| message["prefix"] == true || message["wo_eos"] == true));
         let mut marked = self.render_marked(messages, params)?;
         let generation_prompt = match self.renderer {
             Renderer::DeepseekV32 => !final_message_is_assistant(messages),
-            Renderer::DeepseekV4(_) | Renderer::DeepseekV41(_) => {
-                ends_with_generation_header(&marked)
-            }
+            Renderer::DeepseekV4(_) | Renderer::DeepseekV41 => ends_with_generation_header(&marked),
             // No marked prompt: `render_marked` refused above.
             Renderer::Jinja | Renderer::Glm53(_) => false,
         };
@@ -2117,9 +2115,8 @@ fn detect_renderer_from_config(dir: &Path, has_chat_template: bool) -> Renderer 
     // but some checkpoints identify themselves only via `model_type`.
     let model_type = value.get("model_type").and_then(|v| v.as_str());
     if arch_strs.contains(&"DeepseekV41ForCausalLM") || model_type == Some("deepseek_v41") {
-        let table = detect_dsv41_effort_table(dir);
-        debug!(?path, ?table, "selected DeepseekV41 chat-template renderer");
-        return Renderer::DeepseekV41(table);
+        debug!(?path, "selected pinned DeepseekV41 recipe renderer");
+        return Renderer::DeepseekV41;
     }
     if arch_strs.contains(&"DeepseekV4ForCausalLM") {
         if has_chat_template {
@@ -2152,18 +2149,6 @@ fn detect_dsv4_effort_encoding(dir: &Path) -> deepseek_v4::EffortEncoding {
     match std::fs::read_to_string(dir.join("encoding").join("encoding_dsv4.py")) {
         Ok(source) => deepseek_v4::EffortEncoding::detect_from_encoder_source(&source),
         Err(_) => deepseek_v4::EffortEncoding::V0731,
-    }
-}
-
-/// Pick the effort table of a V4.1 checkpoint from its shipped
-/// `encoding/encoding.py` (`config.json` and `tokenizer_config.json` are the
-/// same across the revisions). Without it (a tokenizer directory streamed
-/// from a worker carries no `encoding/`), the rescaled table the checkpoint
-/// carries today, which its chat template writes too.
-fn detect_dsv41_effort_table(dir: &Path) -> deepseek_v41::EffortTable {
-    match std::fs::read_to_string(dir.join("encoding").join("encoding.py")) {
-        Ok(source) => deepseek_v41::EffortTable::detect_from_encoder_source(&source),
-        Err(_) => deepseek_v41::EffortTable::Rescaled,
     }
 }
 
@@ -2348,31 +2333,6 @@ fn apply_deepseek_v4(
 // ---------------------------------------------------------------------------
 // DeepSeek V4.1 dispatch shim
 // ---------------------------------------------------------------------------
-/// Attach `tools` to the FIRST message whose role is `system`, wherever it
-/// appears in the conversation — the engine's V4.1 rule. This differs from V3.2/V4's
-/// [`inject_tools_into_messages`], which only rewrites a *leading* system
-/// message. Synthesizes an empty leading system message when none exists.
-fn inject_tools_into_first_system_message(
-    messages: &[serde_json::Value],
-    tools: Option<&[serde_json::Value]>,
-) -> Option<Vec<serde_json::Value>> {
-    let tools = tools?;
-    if tools.is_empty() {
-        return None;
-    }
-    let mut owned: Vec<serde_json::Value> = messages.to_vec();
-    let system_index = owned
-        .iter()
-        .position(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
-    let index = system_index.unwrap_or_else(|| {
-        owned.insert(0, serde_json::json!({ "role": "system", "content": "" }));
-        0
-    });
-    if let Some(obj) = owned[index].as_object_mut() {
-        obj.insert("tools".into(), serde_json::Value::Array(tools.to_vec()));
-    }
-    Some(owned)
-}
 
 /// A V4.1 boolean template kwarg (`thinking`, `drop_thinking`): `None` when
 /// absent or JSON `null`; a present value that isn't a JSON boolean is an
@@ -2433,79 +2393,21 @@ fn final_message_is_assistant(messages: &[serde_json::Value]) -> bool {
         == Some("assistant")
 }
 
-/// Whether a render continues its final message natively: asked to, and the
-/// final message is an assistant one (the only shape the V4.1 encoder
-/// continues, as `wo_eos` on that message).
-fn continues_final_assistant_message(
-    messages: &[serde_json::Value],
-    params: &ChatTemplateParams,
-) -> bool {
-    params.continue_final_message && final_message_is_assistant(messages)
-}
-
-/// DeepSeek V4.1 chat-template shim. Order: attach tools to the first system
-/// message (the engine's rule) -> resolve `reasoning_effort` -> resolve the
-/// thinking mode -> `drop_thinking` -> stamp `wo_eos` on a trailing assistant
-/// message when `continue_final_message` asks -> encode.
-///
-/// `continue_final_message` with a trailing assistant message is the
-/// encoder's `wo_eos` route (no EOS, no generation header). The gateway sends
-/// it for a trailing assistant turn because
-/// `renderer_capabilities().native_assistant_continuation` is declared, and
-/// does not arm the reasoning parser for that shape: the message is rendered
-/// past its `</think>`, so the completion starts in content mode.
-/// `add_generation_prompt` is not read: the engine's own encoder reads neither
-/// flag and writes the generation header whatever the request asked, so the
-/// render reports the header it wrote (`ChatTemplateOutput::generation_prompt`)
-/// and the gateway's reasoning decisions follow that rather than the request.
-///
-/// The shim reads the merged template kwargs, so an explicit
-/// `chat_template_kwargs.reasoning_effort` wins over the projected top-level
-/// `reasoning_effort` (SMG's global contract; the engine prefers the top-level
-/// field — a divergence only on contradictory requests).
-///
-/// The thinking mode mirrors the gateway's parser-arming precedence
-/// (`resolve_thinking_pref` in `model_gateway/src/routers/grpc/utils/parsers.rs`)
-/// so the rendered prompt and the arming decision agree on every request
-/// shape:
-/// 1. an explicit `template_kwargs["thinking"]` boolean decides;
-/// 2. else the `reasoning_effort` kwarg: `"none"`/`"minimal"` (the gateway's
-///    thinking switch, `thinking_from_reasoning_effort`) switch thinking off,
-///    a native effort name (`low`/`medium`/`high`/`xhigh`/`max`) switches it
-///    on, and an integer budget has no opinion;
-/// 3. else `params.thinking` (the gateway's projection of the typed
-///    `thinking.type` toggle, else `Some(false)` for a `none`/`minimal`
-///    effective `reasoning_effort`);
-/// 4. else on ([`ThinkingToggle::DefaultOn`]).
-///
-/// Deliberate divergence from the engine's Python renderer: there `reasoning_effort: "none"`
-/// forces chat mode even over an explicit `thinking: true`. Here the explicit
-/// toggle wins, because the gateway arms the reasoning parser from the
-/// explicit toggle first, and rendering chat mode for that contradictory input
-/// would have the armed parser swallow the whole answer as reasoning. Neither
-/// switch value reaches `parse_reasoning_effort` (which rejects both, as the
-/// reference does) and both leave the effort unset, so a thinking-mode prompt
-/// carries the default budget.
+/// Render the pinned recipe's conversation envelope. Explicit protocol
+/// thinking outranks template controls and effort. A trailing assistant
+/// continues without EOS when no generation prompt is requested; the recipe
+/// also recognizes its own `prefix` and `wo_eos` fields.
 fn apply_deepseek_v41(
     messages: &[serde_json::Value],
     params: &ChatTemplateParams,
-    effort_table: deepseek_v41::EffortTable,
 ) -> Result<String> {
-    // `template_kwargs["response_format"]` is deliberately not attached to a
-    // message: the engine's Python renderer never renders V4.1's `## Response Format:` block
-    // (structured output is enforced by the constraint), so the gateway's
-    // projected kwarg is ignored here too. The encoder still renders a
-    // per-message `response_format` for direct callers.
-    let messages = developer_messages_as_system_first(messages);
-    let owned = inject_tools_into_first_system_message(&messages, params.tools);
-    let mut msgs: Vec<serde_json::Value> = owned.unwrap_or_else(|| messages.into_owned());
+    let mut msgs = messages.to_vec();
 
     let effort_kwarg = params
         .template_kwargs
         .and_then(|k| k.get("reasoning_effort"));
     let effort_name = effort_kwarg.and_then(serde_json::Value::as_str);
-    // `"none"`/`"minimal"` are the gateway's thinking switch (both project to
-    // thinking off everywhere else in SMG), not effort levels.
+    // Only none disables thinking; minimal is the recipe's low effort.
     let effort_is_none = effort_name == Some("none");
     let reasoning_effort = if effort_is_none {
         None
@@ -2530,13 +2432,17 @@ fn apply_deepseek_v41(
 
     let drop_thinking = boolean_kwarg_v41(params, "drop_thinking")?.unwrap_or(true);
 
-    // `continue_final_message` with a trailing assistant message reaches the
-    // encoder as `wo_eos` on that message: no EOS, no generation header. That
-    // is the only shape wired; `add_generation_prompt` alone is not read, as
-    // the engine's own encoder reads neither flag: with any other shape the
-    // generation header is written where the conversation takes one (V3.2/V4
-    // read neither flag either).
-    let continues_final_assistant_message = continues_final_assistant_message(&msgs, params);
+    // `add_generation_prompt: false` with a trailing assistant message reaches
+    // the encoder as `wo_eos` on that message: no EOS, no generation header.
+    // That is the only shape wired: with any other trailing role the flag is
+    // ignored and the generation header is appended (V3.2/V4 ignore the flag
+    // entirely).
+    let continues_final_assistant_message = !params.add_generation_prompt
+        && msgs
+            .last()
+            .and_then(|m| m.get("role"))
+            .and_then(|r| r.as_str())
+            == Some("assistant");
     if continues_final_assistant_message {
         if let Some(obj) = msgs.last_mut().and_then(serde_json::Value::as_object_mut) {
             obj.insert("wo_eos".into(), serde_json::Value::Bool(true));
@@ -2547,10 +2453,21 @@ fn apply_deepseek_v41(
         add_default_bos_token: true,
         drop_thinking,
         reasoning_effort,
-        effort_table,
     };
-    deepseek_v41::render_messages(&msgs, thinking_mode, &encode_params)
-        .map_err(|e| Error::msg(format!("DeepSeek V4.1 encode failed: {e}")))
+    deepseek_v41::render_conversation(
+        &msgs,
+        thinking_mode,
+        encode_params,
+        params.tools,
+        params
+            .template_kwargs
+            .and_then(|kwargs| kwargs.get("response_format")),
+        params
+            .template_kwargs
+            .and_then(|kwargs| kwargs.get("tool_choice")),
+    )
+    .map(|prompt| prompt.into_marked())
+    .map_err(|e| Error::msg(format!("DeepSeek V4.1 encode failed: {e}")))
 }
 
 #[cfg(test)]
@@ -3425,7 +3342,7 @@ mod segment_tests {
             )
             .expect("added tokens");
         let mut wrapped = HuggingFaceTokenizer::from_tokenizer(tokenizer);
-        wrapped.renderer = Renderer::DeepseekV41(deepseek_v41::EffortTable::Rescaled);
+        wrapped.renderer = Renderer::DeepseekV41;
         wrapped.profile = wrapped.renderer.profile();
         wrapped
     }
@@ -3477,7 +3394,11 @@ mod segment_tests {
             let twin = tok
                 .apply_chat_template_with_encoding(&system, params(), None)
                 .expect("the renderer renders the conversation");
-            assert_eq!(rendered.text, twin.text);
+            if matches!(tok.renderer, Renderer::DeepseekV41) {
+                assert!(rendered.text.contains("<｜User｜>Follow the policy."));
+            } else {
+                assert_eq!(rendered.text, twin.text);
+            }
             assert!(
                 rendered.text.contains("lookup_weather")
                     && rendered.text.contains("Follow the policy."),
@@ -3527,7 +3448,7 @@ mod segment_tests {
     /// `add_generation_prompt: false` alone is not read, and the message is
     /// closed as the renderer's reference closes it, with no header after it.
     #[test]
-    fn v41_continues_the_final_message_only_when_asked() {
+    fn v41_continues_when_the_generation_prompt_is_disabled() {
         let tok = v41_like(&ADDED);
         let messages = [
             json!({"role": "user", "content": "q"}),
@@ -3551,16 +3472,10 @@ mod segment_tests {
         );
         assert!(continued.continued_final_message);
         assert!(!continued.generation_prompt);
-        let closed = render(false);
-        assert!(
-            closed
-                .text
-                .ends_with("<｜Assistant｜></think>Sure,<｜end▁of▁sentence｜>"),
-            "{}",
-            closed.text
-        );
-        assert!(!closed.continued_final_message);
-        assert!(!closed.generation_prompt);
+        let continued_without_flag = render(false);
+        assert_eq!(continued_without_flag.text, continued.text);
+        assert!(continued_without_flag.continued_final_message);
+        assert!(!continued_without_flag.generation_prompt);
     }
 
     /// The native path reports a continuation only where the renderer
@@ -3642,8 +3557,12 @@ mod segment_tests {
         let rendered = v41_like(&ADDED)
             .apply_chat_template_with_encoding(&system_alone, params(), None)
             .expect("the renderer renders the conversation");
-        assert!(rendered.text.ends_with("Be brief."), "{}", rendered.text);
-        assert!(!rendered.generation_prompt);
+        assert!(
+            rendered.text.ends_with("Be brief.<｜Assistant｜><think>"),
+            "{}",
+            rendered.text
+        );
+        assert!(rendered.generation_prompt);
         // A developer message is rewritten as a system one and merged with
         // the system message after it: one system turn, both texts, no
         // header; the report reads the render, not the request's message list.
@@ -3655,11 +3574,13 @@ mod segment_tests {
             .apply_chat_template_with_encoding(&developer_then_system, params(), None)
             .expect("the renderer renders the conversation");
         assert!(
-            rendered.text.ends_with("Be terse.\n\nAnswer in French."),
+            rendered.text.ends_with(
+                "<｜User｜>Be terse.<｜System｜>Answer in French.<｜Assistant｜><think>"
+            ),
             "{}",
             rendered.text
         );
-        assert!(!rendered.generation_prompt);
+        assert!(rendered.generation_prompt);
     }
 
     fn render(tok: &HuggingFaceTokenizer, messages: &[Value]) -> ChatTemplateOutput {
@@ -3778,10 +3699,9 @@ mod segment_tests {
             .contains("<｜User｜>x</think>y<｜Assistant｜>"));
         assert!(matches!(rendered.encoding, PromptEncoding::Deferred(_)));
         let ids = ids_of(&tok, rendered);
-        // The tools template quotes the think tokens as control tokens
-        // (three times each, as the reference renders it) and the generation
-        // prompt closes with one; the two the request spelled are text.
-        assert_eq!(count(&ids, id(&tok, "</think>")), 3);
+        // Message-local tool updates are plain schemas in the recipe; only
+        // the generation prompt's close is a control token.
+        assert_eq!(count(&ids, id(&tok, "</think>")), 1);
     }
 
     #[test]
@@ -3865,56 +3785,9 @@ mod segment_tests {
         };
         let mut by_hand = vec![id(&tok, "<｜begin▁of▁sentence｜>"), id(&tok, "<｜User｜>")];
         by_hand.extend(plain("q"));
-        by_hand.extend([id(&tok, "<｜Assistant｜>"), id(&tok, "</think>")]);
         by_hand.extend(plain("<｜latest_reminder｜>r"));
+        by_hand.extend([id(&tok, "<｜Assistant｜>"), id(&tok, "</think>")]);
         assert_eq!(&joined[..by_hand.len()], &by_hand[..]);
-    }
-
-    /// A fixture case as `tests/fixtures/deepseek_v41/render_fixtures.json`
-    /// records it (the fields the render needs).
-    #[derive(serde::Deserialize)]
-    struct Case {
-        name: String,
-        messages: Vec<Value>,
-        tools: Option<Vec<Value>>,
-        thinking_mode: String,
-        reasoning_effort: Option<Value>,
-        drop_thinking: bool,
-        continue_final_message: bool,
-        /// The checkpoint revision whose encoder recorded the text, when it
-        /// is not the file's `revision`: the revisions differ in their
-        /// effort table.
-        encoder_revision: Option<String>,
-        text: String,
-    }
-
-    /// The fixture file: the effort tiers of the revision that recorded the
-    /// cases without an `encoder_revision` of their own, those of the
-    /// current revision, and the cases.
-    #[derive(serde::Deserialize)]
-    struct Fixtures {
-        revision: String,
-        effort_tiers: HashMap<String, u8>,
-        current_revision: String,
-        current_effort_tiers: HashMap<String, u8>,
-        cases: Vec<Case>,
-    }
-
-    /// The effort table a recorded tier map is, by the rule
-    /// [`deepseek_v41::EffortTable::detect_from_encoder_source`] applies to
-    /// the encoder source: `low` at 25 is the first published table.
-    fn effort_table_of(tiers: &HashMap<String, u8>) -> deepseek_v41::EffortTable {
-        if tiers.get("low") == Some(&25) {
-            deepseek_v41::EffortTable::Original
-        } else {
-            deepseek_v41::EffortTable::Rescaled
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    struct IdCase {
-        name: String,
-        ids: Vec<u32>,
     }
 
     /// With the checkpoint's own vocabulary (the cache the integration tests
@@ -3931,81 +3804,59 @@ mod segment_tests {
         let Some(path) = dir.join("tokenizer.json").to_str().map(str::to_owned) else {
             return;
         };
-        let Ok(mut tok) = HuggingFaceTokenizer::from_file(&path) else {
+        let Ok(tok) = HuggingFaceTokenizer::from_file(&path) else {
             eprintln!(
                 "skipping: no DeepSeek-V4.1 tokenizer under {}",
                 dir.display()
             );
             return;
         };
-        assert!(matches!(tok.renderer, Renderer::DeepseekV41(_)));
-        let fixtures: Fixtures = serde_json::from_str(include_str!(
-            "../tests/fixtures/deepseek_v41/render_fixtures.json"
-        ))
-        .expect("the fixture shape");
-        let cases = &fixtures.cases;
-        let ids: Vec<IdCase> = serde_json::from_value(
-            serde_json::from_str::<Value>(include_str!(
-                "../tests/fixtures/deepseek_v41/render_ids_fixtures.json"
-            ))
-            .expect("id fixtures")["cases"]
-                .clone(),
-        )
-        .expect("the IdCase shape");
-        assert_eq!(cases.len(), ids.len());
-        let mut controls_seen = 0;
-        for (case, expected) in cases.iter().zip(&ids) {
-            assert_eq!(case.name, expected.name);
-            let mut kwargs = HashMap::from([
-                (
-                    "thinking".to_string(),
-                    json!(case.thinking_mode == "thinking"),
-                ),
-                ("drop_thinking".to_string(), json!(case.drop_thinking)),
-            ]);
-            if let Some(effort) = &case.reasoning_effort {
-                kwargs.insert("reasoning_effort".to_string(), effort.clone());
+        assert!(matches!(tok.renderer, Renderer::DeepseekV41));
+        let recipe: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/deepseek_v41/recipe.json"))
+                .expect("recipe");
+        for case in recipe["cases"].as_array().unwrap() {
+            let mut kwargs = HashMap::new();
+            for (from, to) in [
+                ("thinking", "thinking"),
+                ("drop_thinking", "drop_thinking"),
+                ("effort", "reasoning_effort"),
+                ("response_format", "response_format"),
+                ("tool_choice", "tool_choice"),
+            ] {
+                if let Some(value) = case.get(from) {
+                    kwargs.insert(to.to_string(), value.clone());
+                }
             }
+            let messages = case["messages"].as_array().unwrap();
+            let continues = messages
+                .last()
+                .is_some_and(|message| message["prefix"] == true);
             let params = ChatTemplateParams {
-                add_generation_prompt: !case.continue_final_message,
-                continue_final_message: case.continue_final_message,
-                tools: case.tools.as_deref(),
+                add_generation_prompt: !continues,
+                continue_final_message: continues,
+                tools: case["tools"].as_array().map(Vec::as_slice),
                 template_kwargs: Some(&kwargs),
                 ..Default::default()
             };
-            // The text was recorded by the encoder of one of the file's two
-            // revisions; the renderer writes that revision's effort table.
-            let tiers = match case.encoder_revision.as_deref() {
-                Some(revision) if revision == fixtures.current_revision => {
-                    &fixtures.current_effort_tiers
-                }
-                Some(revision) if revision != fixtures.revision => panic!(
-                    "case {}: encoder_revision {revision} is neither revision nor current_revision",
-                    case.name
-                ),
-                _ => &fixtures.effort_tiers,
-            };
-            tok.renderer = Renderer::DeepseekV41(effort_table_of(tiers));
-            let marked = tok
-                .render_marked(&case.messages, params)
-                .unwrap_or_else(|e| panic!("case {}: {e}", case.name));
+            let marked = tok.render_marked(messages, params).expect("recipe render");
             let segments = marks::segments(&marked).expect("paired marks");
             let (text, controls) = marks::flatten(&marked).expect("paired marks");
-            assert_eq!(text, case.text, "case {}", case.name);
-            assert!(
-                tok.core.flat_encode_is_segment_encode(&text, &controls),
-                "case {}: the flat encode is the segment encode",
-                case.name
+            assert_eq!(text, case["text"].as_str().unwrap(), "{}", case["name"]);
+            assert_eq!(
+                serde_json::to_value(controls).unwrap(),
+                case["special_ranges"],
+                "{}",
+                case["name"]
             );
+            let expected: Vec<u32> = serde_json::from_value(case["ids"].clone()).unwrap();
             assert_eq!(
                 tok.core.encode_segments(&segments).expect("segment encode"),
-                expected.ids,
-                "case {}",
-                case.name
+                expected,
+                "{}",
+                case["name"]
             );
-            controls_seen += controls.len();
         }
-        assert!(controls_seen > cases.len());
 
         for (typed, structural) in [
             ("<｜User｜>", 1),

@@ -7,6 +7,7 @@ mod logprobs;
 pub(crate) mod message_utils;
 mod metrics;
 mod parsers;
+pub(crate) use parsers::continue_prefilled_tool_constraint;
 mod pd_bootstrap;
 mod prepared_tools;
 pub(crate) mod stream_failure;

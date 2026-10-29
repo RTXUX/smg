@@ -130,13 +130,20 @@ pub(crate) fn process_messages_prompt(
     media_order: MediaPartOrder,
 ) -> Result<(ProcessedMessages, PromptEncoding), String> {
     let content_format = tokenizer.chat_template_content_format_for_request(chat_tools.is_some());
+    let separator = tokenizer.renderer_capabilities().message_text_separator;
+    let media_order = if tokenizer.renderer_capabilities().authored_media_order {
+        MediaPartOrder::Authored
+    } else {
+        media_order
+    };
 
     // Step 1: Convert InputMessages to chat template JSON values
-    let mut transformed_messages = process_message_content_format(
+    let mut transformed_messages = process_message_content_format_with_separator(
         request.messages,
         content_format,
         placeholder_tokens,
         media_order,
+        separator,
     )?;
 
     // Step 2: Prepend system message if present
@@ -150,7 +157,7 @@ pub(crate) fn process_messages_prompt(
                     tb.text.as_str()
                 })
                 .collect::<Vec<_>>()
-                .join("\n"),
+                .join(separator.unwrap_or("\n")),
         };
         transformed_messages.insert(0, json!({"role": "system", "content": system_text}));
     }
@@ -520,11 +527,28 @@ pub(crate) async fn count_input_tokens(
 /// - User messages with Blocks → text/image blocks stay as user content,
 ///   ToolResult blocks become separate `{"role": "tool", ...}` messages
 /// - Assistant messages → `{"role": "assistant", "content": ..., "tool_calls": [...], "reasoning_content": ...}`
+#[cfg(test)]
 pub(crate) fn process_message_content_format(
     messages: &[InputMessage],
     content_format: ChatTemplateContentFormat,
     placeholder_tokens: Option<&PlaceholderTokens>,
     media_order: MediaPartOrder,
+) -> Result<Vec<Value>, String> {
+    process_message_content_format_with_separator(
+        messages,
+        content_format,
+        placeholder_tokens,
+        media_order,
+        None,
+    )
+}
+
+fn process_message_content_format_with_separator(
+    messages: &[InputMessage],
+    content_format: ChatTemplateContentFormat,
+    placeholder_tokens: Option<&PlaceholderTokens>,
+    media_order: MediaPartOrder,
+    separator: Option<&str>,
 ) -> Result<Vec<Value>, String> {
     messages
         .iter()
@@ -538,11 +562,16 @@ pub(crate) fn process_message_content_format(
                         content_format,
                         placeholder_tokens,
                         media_order,
+                        separator,
                         &mut result,
                     )?;
                 }
                 messages::Role::Assistant => {
-                    result.push(convert_assistant_message(&message.content, content_format));
+                    result.push(convert_assistant_message(
+                        &message.content,
+                        content_format,
+                        separator,
+                    ));
                 }
                 // A `system`-role message in `messages[]` (e.g. from Claude Code) is
                 // forwarded in place, preserving its position in the conversation so
@@ -552,7 +581,7 @@ pub(crate) fn process_message_content_format(
                 // gets it as a user turn there instead, once the system prompt is
                 // in (`system_messages_after_the_first_as_user_turns`).
                 messages::Role::System => {
-                    result.push(convert_system_message(&message.content));
+                    result.push(convert_system_message(&message.content, separator));
                 }
             }
             Ok(result)
@@ -562,7 +591,7 @@ pub(crate) fn process_message_content_format(
 /// Convert a `system`-role message's content to a chat-template JSON value,
 /// preserving its position in `messages[]`. System content is text; text blocks
 /// are concatenated.
-fn convert_system_message(content: &InputContent) -> Value {
+fn convert_system_message(content: &InputContent, separator: Option<&str>) -> Value {
     let text = match content {
         InputContent::String(text) => text.clone(),
         InputContent::Blocks(blocks) => blocks
@@ -572,7 +601,7 @@ fn convert_system_message(content: &InputContent) -> Value {
                 _ => None,
             })
             .collect::<Vec<_>>()
-            .join("\n"),
+            .join(separator.unwrap_or("\n")),
     };
     json!({"role": "system", "content": text})
 }
@@ -610,6 +639,7 @@ fn convert_user_message(
     content_format: ChatTemplateContentFormat,
     placeholder_tokens: Option<&PlaceholderTokens>,
     media_order: MediaPartOrder,
+    separator: Option<&str>,
     result: &mut Vec<Value>,
 ) -> Result<(), String> {
     match content {
@@ -640,7 +670,7 @@ fn convert_user_message(
                         tool_msgs.push(json!({
                             "role": "tool",
                             "tool_call_id": tr.tool_use_id,
-                            "content": extract_tool_result_text(tr)
+                            "content": extract_tool_result_text(tr, separator)
                         }));
                         // A tool result may carry images (a screenshot a
                         // browser or shell tool returned). They join the
@@ -744,7 +774,10 @@ pub(crate) fn tool_result_image_blocks(
 }
 
 /// Extract text content from a ToolResult block.
-fn extract_tool_result_text(tool_result: &messages::ToolResultBlock) -> String {
+fn extract_tool_result_text(
+    tool_result: &messages::ToolResultBlock,
+    separator: Option<&str>,
+) -> String {
     match &tool_result.content {
         Some(ToolResultContent::String(s)) => s.clone(),
         Some(ToolResultContent::Blocks(blocks)) => blocks
@@ -754,7 +787,7 @@ fn extract_tool_result_text(tool_result: &messages::ToolResultBlock) -> String {
                 _ => None,
             })
             .collect::<Vec<_>>()
-            .join("\n"),
+            .join(separator.unwrap_or("\n")),
         None => String::new(),
     }
 }
@@ -766,6 +799,7 @@ fn extract_tool_result_text(tool_result: &messages::ToolResultBlock) -> String {
 fn convert_assistant_message(
     content: &InputContent,
     content_format: ChatTemplateContentFormat,
+    separator: Option<&str>,
 ) -> Value {
     match content {
         InputContent::String(text) => json!({"role": "assistant", "content": text}),
@@ -805,7 +839,7 @@ fn convert_assistant_message(
             let content = if text_parts.is_empty() {
                 chat_utils::empty_content(content_format)
             } else {
-                Value::String(text_parts.join(""))
+                Value::String(text_parts.join(separator.unwrap_or("")))
             };
             obj.insert("content".into(), content);
             if !tool_calls.is_empty() {
@@ -814,7 +848,7 @@ fn convert_assistant_message(
             if !thinking_parts.is_empty() {
                 obj.insert(
                     "reasoning_content".into(),
-                    Value::String(thinking_parts.join("\n")),
+                    Value::String(thinking_parts.join(separator.unwrap_or("\n"))),
                 );
             }
 

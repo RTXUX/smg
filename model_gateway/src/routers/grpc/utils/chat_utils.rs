@@ -818,6 +818,11 @@ pub(crate) fn process_chat_messages_with_placeholders(
     placeholder_tokens: Option<&PlaceholderTokens>,
     media_order: MediaPartOrder,
 ) -> Result<(ProcessedMessages, PromptEncoding), String> {
+    let media_order = if tokenizer.renderer_capabilities().authored_media_order {
+        MediaPartOrder::Authored
+    } else {
+        media_order
+    };
     let rendered = {
         // Get content format and transform messages accordingly: the format
         // of the template this request renders through, which a checkpoint

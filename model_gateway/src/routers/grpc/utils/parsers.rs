@@ -27,6 +27,75 @@ use crate::{
     worker::{Worker, WorkerRegistry, WorkerType},
 };
 
+/// A required V4.1 call starts inside the block the recipe prefills. Remove
+/// that fixed prefix from the constraint before it is stamped for retries.
+pub(crate) fn continue_prefilled_tool_constraint(
+    constraint: Option<tool_parser::ToolConstraint>,
+    tokenizer: &dyn Tokenizer,
+    required: bool,
+) -> Result<Option<tool_parser::ToolConstraint>, String> {
+    let Some(prefix) = tokenizer
+        .renderer_capabilities()
+        .required_tool_prefix
+        .filter(|_| required)
+    else {
+        return Ok(constraint);
+    };
+    let Some(tool_parser::ToolConstraint::StructuralTag(value)) = constraint else {
+        return Ok(constraint);
+    };
+    let mut value: Value = serde_json::from_str(&value).map_err(|e| e.to_string())?;
+    let mut remaining = prefix;
+    consume_tool_prefix(
+        &mut value["format"],
+        &mut remaining,
+        tokenizer.token_to_id("｜DSML｜"),
+    )?;
+    if !remaining.is_empty() {
+        return Err("tool grammar does not contain the rendered prefix".into());
+    }
+    Ok(Some(tool_parser::ToolConstraint::StructuralTag(
+        value.to_string(),
+    )))
+}
+
+fn consume_tool_prefix(
+    format: &mut Value,
+    remaining: &mut &str,
+    dsml: Option<u32>,
+) -> Result<(), String> {
+    if remaining.is_empty() {
+        return Ok(());
+    }
+    match format["type"].as_str() {
+        Some("sequence") => {
+            for element in format["elements"]
+                .as_array_mut()
+                .ok_or("invalid grammar sequence")?
+            {
+                consume_tool_prefix(element, remaining, dsml)?;
+                if remaining.is_empty() {
+                    break;
+                }
+            }
+        }
+        Some("const_string") => {
+            *remaining = remaining
+                .strip_prefix(format["value"].as_str().ok_or("invalid grammar literal")?)
+                .ok_or("tool grammar prefix differs from prompt")?;
+            format["value"] = Value::String(String::new());
+        }
+        Some("token") if dsml.is_some() && format["token"].as_u64() == dsml.map(u64::from) => {
+            *remaining = remaining
+                .strip_prefix("｜DSML｜")
+                .ok_or("unexpected grammar token in prefix")?;
+            *format = serde_json::json!({"type":"const_string","value":""});
+        }
+        _ => return Err("tool grammar cannot continue the rendered prefix".into()),
+    }
+    Ok(())
+}
+
 /// Per-request parser-name resolution.
 ///
 /// For the legacy parsers, each kind's name is the model's `ModelCard`
@@ -481,6 +550,24 @@ pub fn chat_reasoning_starts_in_rendered_prefill(
     continued_final_message: bool,
     tokenizer: &dyn Tokenizer,
 ) -> bool {
+    if continued_final_message
+        && tokenizer
+            .renderer_capabilities()
+            .required_tool_prefix
+            .is_some()
+        && matches!(request.messages.last(), Some(openai_protocol::chat::ChatMessage::Assistant { content, tool_calls, .. })
+            if content.as_ref().is_none_or(|content| content.to_simple_string().is_empty())
+                && tool_calls.as_ref().is_none_or(Vec::is_empty))
+    {
+        return resolve_user_thinking(
+            request.chat_template_kwargs.as_ref(),
+            request.effective_reasoning_effort(),
+            request.thinking_toggle(),
+            tokenizer,
+            ProviderProfile::for_model(&request.model),
+        )
+        .unwrap_or(true);
+    }
     if !generation_prompt && !continued_final_message {
         return false;
     }
@@ -820,6 +907,30 @@ pub(crate) fn create_tool_parser(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prefilled_dsml_constraints_keep_multiple_invokes_and_only_one_close() {
+        let tools = vec![serde_json::from_value(serde_json::json!({"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}})).unwrap()];
+        let legacy =
+            tool_parser::parsers::DeepSeekDsmlParser::build_v41_structural_tag(&tools, true);
+        let format = symphony::formats::deepseek_v4_1()
+            .marker_tokens([symphony::MarkerToken::new("｜DSML｜", 128825)]);
+        let bound = format.grammar(&tools, true, false).unwrap().payload();
+        let mut fixtures = Vec::new();
+        for mut grammar in [legacy, bound] {
+            fixtures.push(serde_json::json!({"prefilled":false,"grammar":grammar}));
+            let mut prefix = "\n\n<｜DSML｜ calls>\n";
+            consume_tool_prefix(&mut grammar["format"], &mut prefix, Some(128825)).unwrap();
+            assert!(prefix.is_empty());
+            let encoded = grammar.to_string();
+            assert!(!encoded.contains("\\n\\n<｜DSML｜ calls>"));
+            assert!(encoded.contains("lookup"));
+            assert!(!encoded.contains("\"stop_after_first\":true"));
+            fixtures.push(serde_json::json!({"prefilled":true,"grammar":grammar}));
+        }
+        if let Ok(path) = std::env::var("SMG_V41_GRAMMARS_OUT") {
+            std::fs::write(path, serde_json::to_vec_pretty(&fixtures).unwrap()).unwrap();
+        }
+    }
     use std::sync::Arc;
 
     use llm_multimodal::MediaPartOrder;

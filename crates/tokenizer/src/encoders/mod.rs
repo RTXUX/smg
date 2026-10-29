@@ -3,7 +3,7 @@
 //! form of a prompt such a renderer hands its backend: control tokens the
 //! renderer wrote, and plain text in which the same spellings stay text.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 use serde_json::Value;
 
@@ -20,6 +20,53 @@ pub mod glm53;
 pub mod kimi_k25_tools;
 pub mod kimi_k3_xtml;
 pub(crate) mod marks;
+
+/// Prompt text with the byte ranges that are explicit added tokens. Everything outside those
+/// ranges is encoded without the added vocabulary, including text taken from the request.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Prompt {
+    text: String,
+    special_ranges: Vec<Range<usize>>,
+}
+
+impl Prompt {
+    pub(crate) fn push_plain(&mut self, text: impl AsRef<str>) {
+        self.text.push_str(&marks::strip(text.as_ref()));
+    }
+
+    pub(crate) fn push_special(&mut self, token: &str) {
+        let start = self.text.len();
+        self.text.push_str(token);
+        self.special_ranges.push(start..self.text.len());
+    }
+
+    pub(crate) fn append(&mut self, other: Self) {
+        let offset = self.text.len();
+        self.text.push_str(&other.text);
+        self.special_ranges.extend(
+            other
+                .special_ranges
+                .into_iter()
+                .map(|range| range.start + offset..range.end + offset),
+        );
+    }
+
+    pub(crate) fn into_marked(self) -> String {
+        let mut marked = String::new();
+        let mut cursor = 0;
+        for range in &self.special_ranges {
+            marked.push_str(&self.text[cursor..range.start]);
+            marked.push_str(&marks::mark(&self.text[range.clone()]));
+            cursor = range.end;
+        }
+        marked.push_str(&self.text[cursor..]);
+        marked
+    }
+
+    pub(crate) fn into_parts(self) -> (String, Vec<Range<usize>>) {
+        (self.text, self.special_ranges)
+    }
+}
 
 /// One piece of a rendered prompt, tagged with how special-token strings in
 /// it must be encoded (the Kimi reference's `EncodeSegment { text,
@@ -103,6 +150,9 @@ impl RendererProfile {
     /// The behaviours no native renderer has unless its table says so.
     pub(crate) const NO_CAPABILITIES: RendererCapabilities = RendererCapabilities {
         media_handling: MediaHandling::Preprocess,
+        required_tool_prefix: None,
+        message_text_separator: None,
+        authored_media_order: false,
         enable_thinking_alias: false,
         native_assistant_continuation: false,
         raw_tool_call_arguments: false,

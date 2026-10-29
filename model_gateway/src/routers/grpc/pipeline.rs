@@ -5126,11 +5126,10 @@ mod request_release_tests {
         assert!(ids.is_empty(), "nothing must reach the worker");
     }
 
-    /// `medium` is a level of the checkpoint's own chat template (budget
-    /// 62): the top-level field and the template kwarg both render it
-    /// instead of refusing the request.
+    /// The pinned recipe maps `medium` to `high` (budget 75), through both
+    /// the top-level field and the template kwarg.
     #[tokio::test]
-    async fn deepseek_v41_medium_effort_renders_the_checkpoints_budget() {
+    async fn deepseek_v41_medium_effort_renders_the_recipe_budget() {
         let Some(dir) = deepseek_v41_model_dir() else {
             skip_no_tokenizer();
             return;
@@ -5164,7 +5163,7 @@ mod request_release_tests {
             );
             let prompt = tokenizer.decode(&ids[0], false).expect("decode the prompt");
             assert!(
-                prompt.contains("Reasoning Effort: 62 (range"),
+                prompt.contains("Reasoning Effort: 75 (range"),
                 "{request}: {prompt}"
             );
         }

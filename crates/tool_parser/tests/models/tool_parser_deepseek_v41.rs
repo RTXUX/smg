@@ -365,7 +365,7 @@ fn factory_maps_v41_names_ahead_of_v4_and_registers_a_structural_tag() {
 }
 
 #[test]
-fn structural_tag_mirrors_vllm_forced_grammar() {
+fn structural_tag_requires_token_aware_dsml_values() {
     let tools = vec![Tool {
         tool_type: "function".to_string(),
         function: Function {
@@ -378,34 +378,14 @@ fn structural_tag_mirrors_vllm_forced_grammar() {
     }];
     let tag = DeepSeekDsmlParser::build_v41_structural_tag(&tools, true);
     let format = &tag["format"];
-    assert_eq!(format["type"], "sequence");
-    assert_eq!(format["elements"][0]["value"], "\n\n<｜DSML｜ calls>\n");
-    assert_eq!(format["elements"][2]["value"], "</｜DSML｜ calls>");
     let calls = &format["elements"][1];
-    assert_eq!(calls["type"], "tags_with_separator");
-    assert_eq!(calls["at_least_one"], true);
-    assert_eq!(
-        calls["tags"][0]["begin"],
-        "<｜DSML｜ invoke name=\"get_weather\">\n"
-    );
-    assert_eq!(calls["tags"][0]["end"], "</｜DSML｜ invoke>\n");
-    let parameter = &calls["tags"][0]["content"]["content"];
-    assert_eq!(parameter["begin"], "<｜DSML｜ parameter name=\"");
-    assert_eq!(parameter["end"], "</｜DSML｜ parameter>\n");
-    let branches = &parameter["content"]["elements"][2]["elements"];
-    assert_eq!(branches[0]["elements"][0]["value"], "true\">");
-    assert_eq!(
-        branches[0]["elements"][1]["excludes"],
-        json!([
-            "</｜DSML｜ parameter>",
-            "</｜DSML｜ invoke>",
-            "</｜DSML｜ calls>"
-        ])
-    );
-    assert_eq!(branches[1]["elements"][0]["value"], "false\">");
-    assert_eq!(branches[1]["elements"][1]["type"], "json_schema");
-    let constraint = factory_constraint(&tools);
-    assert!(constraint.contains("<｜DSML｜ invoke name=\\\"get_weather\\\">"));
+    assert_eq!(calls["type"], "plus");
+    let parameter = &calls["content"]["elements"][0]["elements"][1]["content"];
+    let branches = &parameter["elements"][2]["elements"];
+    assert_eq!(branches[0]["elements"][0]["type"], "token_span");
+    assert_eq!(branches[1]["elements"][1]["type"], "token_json");
+    let constraint: serde_json::Value = serde_json::from_str(&factory_constraint(&tools)).unwrap();
+    assert_eq!(constraint, tag);
 }
 
 #[expect(clippy::unwrap_used, reason = "test helper — panics are intentional")]

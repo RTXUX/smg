@@ -24,6 +24,7 @@ mod v1;
 mod word_cache;
 
 pub mod chat_template;
+mod grammar;
 pub mod huggingface;
 mod kimi_k2_tokenizer;
 pub mod tiktoken;

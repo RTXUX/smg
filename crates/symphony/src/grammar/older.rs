@@ -107,7 +107,12 @@ fn older(grammar: Grammar, ends: &[String], tail: bool) -> Grammar {
         | Grammar::Regex(_)
         | Grammar::JsonSchema { .. }
         | Grammar::Ebnf(_)
-        | Grammar::Token(_)) => leaf,
+        | Grammar::Token(_)
+        | Grammar::TokenSpelling(_)
+        | Grammar::AnyTokens(_)
+        | Grammar::TokenSuffix(_)
+        | Grammar::TokenSpan { .. }
+        | Grammar::TokenJson) => leaf,
     }
 }
 
@@ -300,6 +305,11 @@ fn unlimited(grammar: &Grammar) -> bool {
         | Grammar::JsonSchema { .. }
         | Grammar::Ebnf(_)
         | Grammar::Token(_)
+        | Grammar::TokenSpelling(_)
+        | Grammar::AnyTokens(_)
+        | Grammar::TokenSuffix(_)
+        | Grammar::TokenSpan { .. }
+        | Grammar::TokenJson
         | Grammar::Tag(_) => false,
     }
 }
@@ -445,6 +455,18 @@ mod tests {
         assert!(all.len() > 1000, "{} grammars", all.len());
         let mut rewritten = 0;
         for (name, grammar) in all {
+            let mut symbolic = Vec::new();
+            types(&grammar.to_json(), &mut symbolic);
+            if symbolic
+                .iter()
+                .any(|node| matches!(node.as_str(), "token_span" | "token_suffix" | "token_json"))
+            {
+                // V4.1's token templates need a model vocabulary before a
+                // backend can check them; the gateway's production-token
+                // mask tests cover that lowering separately.
+                assert!(name.starts_with("deepseek_v4.1 "), "{name}");
+                continue;
+            }
             let older = grammar.clone().in_older_vocabulary();
             let mut found = Vec::new();
             types(&older.to_json(), &mut found);

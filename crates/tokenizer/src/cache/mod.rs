@@ -459,6 +459,10 @@ impl Decoder for CachedTokenizer {
 }
 
 impl Tokenizer for CachedTokenizer {
+    fn resolve_grammar_tokens(&self, format: &mut serde_json::Value) -> Result<()> {
+        self.inner.resolve_grammar_tokens(format)
+    }
+
     fn vocab_size(&self) -> usize {
         self.inner.vocab_size()
     }

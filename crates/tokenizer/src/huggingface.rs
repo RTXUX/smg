@@ -39,6 +39,7 @@ use crate::{
         deepseek_v32, deepseek_v4, deepseek_v41, ends_with_generation_header, glm53, marks,
         PromptSegment, RendererProfile,
     },
+    grammar::GrammarTokens,
     native::{AddedTokens, NativeEncoder},
     traits::{
         ChatTemplateOutput, DecodeStep, Decoder, EncodeJob, Encoder, Encoding, IncrementalDecoder,
@@ -78,6 +79,7 @@ pub struct HuggingFaceTokenizer {
     /// The `tokenizers` pipeline and the direct encode path, shared with the
     /// deferred encode of a prompt rendered by segments.
     core: Arc<EncoderCore>,
+    grammar_tokens: GrammarTokens,
     special_tokens: SpecialTokens,
     vocab: HashMap<String, TokenIdType>,
     reverse_vocab: HashMap<TokenIdType, String>,
@@ -763,6 +765,7 @@ impl HuggingFaceTokenizer {
             pieces: PieceTable::build(&tokenizer),
             #[cfg(feature = "tokenizers-v1")]
             v1: encoders.v1,
+            grammar_tokens: GrammarTokens::prepare(&tokenizer),
             core: Arc::new(EncoderCore::new(tokenizer, encoders.native)),
             special_tokens,
             vocab,
@@ -1007,6 +1010,7 @@ impl HuggingFaceTokenizer {
             pieces: PieceTable::build(&tokenizer),
             #[cfg(feature = "tokenizers-v1")]
             v1: encoders.v1,
+            grammar_tokens: GrammarTokens::prepare(&tokenizer),
             core: Arc::new(EncoderCore::new(tokenizer, encoders.native)),
             special_tokens,
             vocab,
@@ -1864,6 +1868,10 @@ impl HuggingFaceTokenizer {
 }
 
 impl TokenizerTrait for HuggingFaceTokenizer {
+    fn resolve_grammar_tokens(&self, format: &mut serde_json::Value) -> Result<()> {
+        self.grammar_tokens.resolve(&self.core.tokenizer, format)
+    }
+
     fn vocab_size(&self) -> usize {
         self.core.tokenizer.get_vocab_size(false)
     }

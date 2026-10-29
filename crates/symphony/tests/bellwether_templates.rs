@@ -1330,7 +1330,15 @@ fn ends(grammar: &Grammar, text: &str, at: usize) -> Vec<usize> {
             .then_some(at + literal.len())
             .into_iter()
             .collect(),
-        Grammar::Token(_) => Vec::new(),
+        // This text-only fixture matcher cannot establish token identity.
+        // DSML's numeric and symbolic leaves are exercised with XGrammar and
+        // the production tokenizer by the gateway grammar export tests.
+        Grammar::Token(_)
+        | Grammar::TokenSpelling(_)
+        | Grammar::AnyTokens(_)
+        | Grammar::TokenSuffix(_)
+        | Grammar::TokenSpan { .. }
+        | Grammar::TokenJson => Vec::new(),
         Grammar::AnyText { excludes } => free(text, at, excludes),
         Grammar::JsonSchema { schema, .. } => json_ends(schema, text, at),
         Grammar::Regex(_) | Grammar::Ebnf(_) => Vec::new(),

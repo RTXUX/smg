@@ -14,6 +14,7 @@ use std::sync::Arc;
 use axum::response::Response;
 use llm_tokenizer::traits::Tokenizer;
 use openai_protocol::common::Tool;
+use tool_parser::ToolConstraint;
 use tracing::error;
 
 use crate::{
@@ -323,7 +324,33 @@ pub(crate) fn decide(
     if decided.by_policy {
         ctx.state.constraint_decided_on = Some(decoding);
     }
-    let tool_constraints = decided.constraint.map(|constraint| constraint.to_tuple());
+    let required = match asks {
+        Asks::Chat(request) => request
+            .tool_choice
+            .as_ref()
+            .is_some_and(openai_protocol::common::ToolChoice::forces_call),
+        Asks::Messages { request, .. } => matches!(
+            request.tool_choice,
+            Some(
+                openai_protocol::messages::ToolChoice::Any { .. }
+                    | openai_protocol::messages::ToolChoice::Tool { .. }
+            )
+        ),
+    };
+    let tokenizer = ctx.tokenizer_arc();
+    let constraint = if let Some(tokenizer) = &tokenizer {
+        utils::continue_prefilled_tool_constraint(decided.constraint, tokenizer.as_ref(), required)
+            .map_err(|why| error::bad_request("invalid_tool_constraint", why))?
+    } else {
+        decided.constraint
+    };
+    let tool_constraints = constraint.map(|constraint| constraint.to_tuple());
+    let table_tag = match (decided.table_tag, tokenizer) {
+        (Some(inner), Some(tokenizer)) => {
+            Some(Arc::new(ResolvedTag { inner, tokenizer }) as Arc<dyn TagForStart>)
+        }
+        (tag, _) => tag,
+    };
     let assignment = symphony::assign(
         parser,
         &names,
@@ -342,12 +369,46 @@ pub(crate) fn decide(
         None => ParserChoice::Legacy,
     });
     Ok(Decided {
-        table_tag: decided.table_tag,
+        table_tag,
         tool_constraints,
         whole_turn: decided.whole_turn,
         first_token: decided.first_token,
         assignment,
     })
+}
+
+/// Resolve a tag again after a retry selects an engine with a different grammar start.
+struct ResolvedTag {
+    inner: Arc<dyn TagForStart>,
+    tokenizer: Arc<dyn Tokenizer>,
+}
+
+impl std::fmt::Debug for ResolvedTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedTag")
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TagForStart for ResolvedTag {
+    fn tag_for(
+        &self,
+        start: tool_parser::GrammarStart,
+        vocabulary: utils::TagVocabulary,
+    ) -> Result<Option<String>, String> {
+        let tag = self.inner.tag_for(start, vocabulary)?;
+        utils::continue_prefilled_tool_constraint(
+            tag.map(ToolConstraint::StructuralTag),
+            self.tokenizer.as_ref(),
+            false,
+        )
+        .map(|tag| tag.map(|tag| tag.to_tuple().1))
+    }
+
+    fn schema(&self) -> Option<&serde_json::Value> {
+        self.inner.schema()
+    }
 }
 
 #[cfg(test)]

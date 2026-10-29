@@ -1331,6 +1331,9 @@ fn render_with(capabilities: RendererCapabilities, request: &ChatCompletionReque
 
 const NATIVE_CONTINUATION: RendererCapabilities = RendererCapabilities {
     media_handling: llm_tokenizer::traits::MediaHandling::Preprocess,
+    required_tool_prefix: None,
+    message_text_separator: None,
+    authored_media_order: false,
     enable_thinking_alias: false,
     native_assistant_continuation: true,
     raw_tool_call_arguments: false,
@@ -1338,6 +1341,9 @@ const NATIVE_CONTINUATION: RendererCapabilities = RendererCapabilities {
 };
 const RAW_ARGUMENTS: RendererCapabilities = RendererCapabilities {
     media_handling: llm_tokenizer::traits::MediaHandling::Preprocess,
+    required_tool_prefix: None,
+    message_text_separator: None,
+    authored_media_order: false,
     enable_thinking_alias: false,
     native_assistant_continuation: false,
     raw_tool_call_arguments: true,

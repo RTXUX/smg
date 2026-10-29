@@ -577,6 +577,7 @@ pub struct ThinkingBlock {
     pub thinking: String,
 
     /// Signature for the thinking block
+    #[serde(default)]
     pub signature: String,
 }
 
@@ -2278,6 +2279,41 @@ mod tests {
     use serde_json::{self, json};
 
     use super::*;
+
+    #[test]
+    fn unsigned_thinking_replays_in_messages_and_token_counts() {
+        let mut body = json!({
+            "model": "deepseek-flash", "max_tokens": 128,
+            "messages": [{"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "Look up the weather."},
+                {"type": "tool_use", "id": "call_1", "name": "weather", "input": {}}
+            ]}]
+        });
+        for signature in [None, Some(json!("opaque"))] {
+            if let Some(value) = &signature {
+                body["messages"][0]["content"][0]["signature"] = value.clone();
+            }
+            let request: CreateMessageRequest = serde_json::from_value(body.clone()).unwrap();
+            let count: CountMessageTokensRequest = serde_json::from_value(body.clone()).unwrap();
+            for message in [&request.messages[0], &count.messages[0]] {
+                let InputContent::Blocks(blocks) = &message.content else {
+                    panic!("content blocks");
+                };
+                let InputContentBlock::Thinking(thinking) = &blocks[0] else {
+                    panic!("thinking block");
+                };
+                assert_eq!(thinking.thinking, "Look up the weather.");
+                assert_eq!(
+                    thinking.signature,
+                    signature.as_ref().and_then(Value::as_str).unwrap_or("")
+                );
+            }
+        }
+        for invalid in [Value::Null, json!(7)] {
+            body["messages"][0]["content"][0]["signature"] = invalid;
+            assert!(serde_json::from_value::<CreateMessageRequest>(body.clone()).is_err());
+        }
+    }
 
     /// A trailing assistant message is continued when it has text and no
     /// tool call: as a string, as text blocks, with thinking before the

@@ -458,6 +458,14 @@ impl ChatCompletionRequest {
 
     /// The thinking preference stated by `thinking.type`, if any.
     pub fn thinking_toggle(&self) -> Option<bool> {
+        if ProviderProfile::for_model(&self.model) == ProviderProfile::DeepSeek
+            && self
+                .thinking
+                .as_ref()
+                .is_some_and(|thinking| thinking.r#type == Some(ThinkingType::Adaptive))
+        {
+            return Some(true);
+        }
         self.thinking.as_ref().and_then(ThinkingParam::toggle)
     }
 

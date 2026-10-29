@@ -8,7 +8,7 @@ use validator::Validate;
 #[expect(clippy::expect_used, reason = "test helper")]
 fn request(extra: Value) -> ChatCompletionRequest {
     let mut body =
-        json!({"model": "deepseek-flash", "messages": [{"role": "user", "content": "hello"}]});
+        json!({"model": "deepseek-v4-pro", "messages": [{"role": "user", "content": "hello"}]});
     body.as_object_mut()
         .expect("object")
         .extend(extra.as_object().expect("object").clone());
@@ -56,9 +56,9 @@ fn deepseek_profile_is_limited_to_the_verified_v4_family() {
 #[test]
 fn deepseek_effort_aliases_preserve_thinking_and_normalize_levels() {
     for (input, canonical) in [
-        ("minimal", "low"),
+        ("minimal", "none"),
         ("medium", "high"),
-        ("xhigh", "high"),
+        ("xhigh", "max"),
         ("none", "none"),
         ("low", "low"),
         ("high", "high"),
@@ -78,7 +78,6 @@ fn deepseek_effort_aliases_preserve_thinking_and_normalize_levels() {
 #[test]
 fn deepseek_rejects_unsupported_thinking_and_effort() {
     for extra in [
-        json!({"thinking": {"type": "adaptive"}}),
         json!({"reasoning_effort": "turbo"}),
         json!({"thinking": {"effort": "turbo"}, "reasoning_effort": "high"}),
     ] {
@@ -86,10 +85,6 @@ fn deepseek_rejects_unsupported_thinking_and_effort() {
     }
 }
 
-/// A forced tool choice (a named function, `required`) validates in either
-/// thinking mode: a self-hosted engine serves the call after the model's
-/// thought, and the vendor's own API refuses the combination by itself where
-/// it does. `auto` and `none` validate as before.
 #[test]
 fn deepseek_forced_tools_validate_in_either_thinking_mode() {
     for choice in [
@@ -122,9 +117,10 @@ fn deepseek_forced_tools_validate_in_either_thinking_mode() {
 #[test]
 fn deepseek_projects_one_thinking_decision_for_validation_and_rendering() {
     for model in ["deepseek-v4-pro", "deepseek-ai/DeepSeek-V4.1-Flash"] {
+        let v41 = model.contains("V4.1");
         for (extra, enabled) in [
-            (json!({}), true),
-            (json!({"reasoning_effort":"minimal"}), true),
+            (json!({}), v41),
+            (json!({"reasoning_effort":"minimal"}), v41),
             (json!({"reasoning_effort":"low"}), true),
             (json!({"reasoning_effort":"none"}), false),
             (
@@ -133,7 +129,7 @@ fn deepseek_projects_one_thinking_decision_for_validation_and_rendering() {
             ),
             (
                 json!({"thinking":{"type":"enabled"},"reasoning_effort":"none"}),
-                true,
+                v41,
             ),
             (
                 json!({"chat_template_kwargs":{"enable_thinking":false},"reasoning_effort":"high"}),
@@ -141,11 +137,11 @@ fn deepseek_projects_one_thinking_decision_for_validation_and_rendering() {
             ),
             (
                 json!({"chat_template_kwargs":{"thinking":true},"thinking":{"type":"disabled"}}),
-                true,
+                false,
             ),
             (
                 json!({"chat_template_kwargs":{"reasoning_effort":"none"},"thinking":{"type":"enabled"}}),
-                false,
+                v41,
             ),
         ] {
             let mut extra = extra;
@@ -169,8 +165,6 @@ fn deepseek_projects_one_thinking_decision_for_validation_and_rendering() {
     }
 }
 
-/// `allowed_tools` in `required` mode is a forced choice too, and validates in
-/// either thinking mode like the others.
 #[test]
 fn deepseek_required_allowed_tools_validate_in_either_thinking_mode() {
     for enabled in [true, false] {
@@ -188,7 +182,6 @@ fn deepseek_rejects_ambiguous_template_thinking_overrides() {
     for kwargs in [
         json!({"thinking":"bad","enable_thinking":false}),
         json!({"enable_thinking":0}),
-        json!({"thinking":true,"enable_thinking":false}),
     ] {
         let req = request(
             json!({"model":"deepseek-v4-pro","reasoning_effort":"high","chat_template_kwargs":kwargs}),
@@ -222,7 +215,11 @@ fn deepseek_v41_preserves_native_medium_and_xhigh_for_both_effort_fields() {
                 extra["model"] = json!(model);
                 let req = request(extra);
                 assert!(req.validate().is_ok(), "{model} {effort}");
-                assert_eq!(req.effective_reasoning_effort(), Some(effort), "{model}");
+                assert_eq!(
+                    req.effective_reasoning_effort(),
+                    Some(if effort == "medium" { "high" } else { effort }),
+                    "{model}"
+                );
             }
         }
     }
@@ -234,7 +231,7 @@ fn deepseek_v41_reads_a_template_kwarg_medium_as_a_level_of_its_own() {
     // other levels; under V4 it stays an alias with no opinion on the mode,
     // so the typed toggle decides.
     for (model, enabled) in [
-        ("deepseek-ai/DeepSeek-V4.1-Flash", true),
+        ("deepseek-ai/DeepSeek-V4.1-Flash", false),
         ("deepseek-v4-pro", false),
     ] {
         let req = request(json!({
@@ -263,7 +260,7 @@ fn deepseek_v41_forwards_the_vendors_reading_of_medium_to_an_upstream_renderer()
         "reasoning_effort": "medium",
         "thinking": {"effort": "medium"},
     }));
-    assert_eq!(req.effective_reasoning_effort(), Some("medium"));
+    assert_eq!(req.effective_reasoning_effort(), Some("high"));
     ProviderProfile::DeepSeek.normalize_chat_for_upstream(&mut req);
     assert_eq!(req.reasoning_effort.as_deref(), Some("high"));
     assert_eq!(
@@ -273,7 +270,7 @@ fn deepseek_v41_forwards_the_vendors_reading_of_medium_to_an_upstream_renderer()
         Some("high")
     );
 
-    // `xhigh` and a template kwarg go out as sent.
+    // The explicit effort wins over the template kwarg.
     let mut req = request(json!({
         "model": "deepseek-v4.1-flash",
         "reasoning_effort": "xhigh",
@@ -285,7 +282,7 @@ fn deepseek_v41_forwards_the_vendors_reading_of_medium_to_an_upstream_renderer()
         req.chat_template_kwargs
             .as_ref()
             .and_then(|kwargs| kwargs.get("reasoning_effort")),
-        Some(&json!("medium"))
+        Some(&json!("xhigh"))
     );
 
     // V4 aliased `medium` at normalization already; nothing more happens.
@@ -344,7 +341,7 @@ fn deepseek_rejects_invalid_or_non_v41_budgets() {
             }
         }
     }
-    for model in ["deepseek-flash", "deepseek-v4-pro"] {
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
         assert!(request(json!({"model":model,"reasoning_effort":42}))
             .validate()
             .is_err());
@@ -370,7 +367,10 @@ fn deepseek_v41_keeps_its_reading_under_a_registered_alias() {
         ] {
             let req = request(extra);
             assert!(req.validate().is_ok(), "{effort}");
-            assert_eq!(req.effective_reasoning_effort(), Some(effort));
+            assert_eq!(
+                req.effective_reasoning_effort(),
+                Some(if effort == "medium" { "high" } else { effort })
+            );
         }
     }
     let req = request(json!({"model": ALIAS, "reasoning_effort": "minimal"}));
@@ -388,7 +388,7 @@ fn deepseek_v41_keeps_its_reading_under_a_registered_alias() {
         req.chat_template_kwargs
             .as_ref()
             .and_then(|kwargs| kwargs.get("thinking")),
-        Some(&json!(true))
+        Some(&json!(false))
     );
 
     // An integer budget is V4.1's extension and validates under the alias.
@@ -412,7 +412,7 @@ fn deepseek_v41_is_read_from_the_names_that_carry_the_contract() {
     ProviderProfile::register_model_aliases([(V41_NAME, SERVED)]);
     for model in [SERVED, V41_NAME] {
         let req = request(json!({"model": model, "reasoning_effort": "medium"}));
-        assert_eq!(req.effective_reasoning_effort(), Some("medium"), "{model}");
+        assert_eq!(req.effective_reasoning_effort(), Some("high"), "{model}");
     }
 
     // A vendor-named alias is read as its own name, as a request naming it
@@ -427,7 +427,7 @@ fn deepseek_v41_is_read_from_the_names_that_carry_the_contract() {
     let req = request(json!({"model": V4_NAME_OF_A_V41_MODEL, "reasoning_effort": "medium"}));
     assert_eq!(req.effective_reasoning_effort(), Some("high"));
     let req = request(json!({"model": V41_NAME_OF_A_V4_MODEL, "reasoning_effort": "medium"}));
-    assert_eq!(req.effective_reasoning_effort(), Some("medium"));
+    assert_eq!(req.effective_reasoning_effort(), Some("high"));
 
     // One vendor's name for another vendor's model is read as that model: a
     // Kimi-named alias of the V4.1 model takes its profile and keeps `medium`.
@@ -438,7 +438,7 @@ fn deepseek_v41_is_read_from_the_names_that_carry_the_contract() {
         ProviderProfile::DeepSeek
     );
     let req = request(json!({"model": KIMI_NAME_OF_A_V41_MODEL, "reasoning_effort": "medium"}));
-    assert_eq!(req.effective_reasoning_effort(), Some("medium"));
+    assert_eq!(req.effective_reasoning_effort(), Some("high"));
 }
 
 #[test]
@@ -454,7 +454,11 @@ fn an_opaque_model_under_the_names_of_two_versions_keeps_the_v4_reading() {
     for (model, effort) in [(SERVED, "high"), (V4_NAME, "high"), (V41_NAME, "medium")] {
         let req = request(json!({"model": model, "reasoning_effort": "medium"}));
         assert_eq!(ProviderProfile::for_model(model), ProviderProfile::DeepSeek);
-        assert_eq!(req.effective_reasoning_effort(), Some(effort), "{model}");
+        assert_eq!(
+            req.effective_reasoning_effort(),
+            Some(if effort == "medium" { "high" } else { effort }),
+            "{model}"
+        );
     }
     assert!(request(json!({"model": SERVED, "reasoning_effort": 62}))
         .validate()
@@ -462,4 +466,45 @@ fn an_opaque_model_under_the_names_of_two_versions_keeps_the_v4_reading() {
     assert!(request(json!({"model": V41_NAME, "reasoning_effort": 62}))
         .validate()
         .is_ok());
+}
+
+#[test]
+fn adaptive_and_aliases_use_one_normalized_thinking_mode() {
+    for model in [
+        "deepseek-v4-pro",
+        "deepseek-flash",
+        "org/deepseek-v41-flash",
+    ] {
+        let req = request(
+            json!({"model":model,"thinking":{"type":"adaptive"},"reasoning_effort":"ultra"}),
+        );
+        assert!(req.validate().is_ok());
+        assert_eq!(req.template_thinking(), Some(true));
+        assert_eq!(req.effective_reasoning_effort(), Some("max"));
+        let kwargs = req.chat_template_kwargs.unwrap();
+        assert_eq!(kwargs["thinking"], true);
+        assert_eq!(kwargs["enable_thinking"], true);
+    }
+}
+
+#[test]
+fn messages_and_token_counts_resolve_the_same_controls() {
+    use openai_protocol::messages::{CountMessageTokensRequest, CreateMessageRequest};
+    for (thinking, effort, enabled, normalized) in [
+        (json!({"type":"adaptive"}), "ultra", true, "max"),
+        (json!({"type":"disabled"}), "max", false, "max"),
+        (json!({"type":"enabled"}), "none", true, "none"),
+        (Value::Null, "minimal", true, "low"),
+        (Value::Null, "none", false, "none"),
+    ] {
+        let body = json!({"model":"deepseek-flash","max_tokens":2048,
+            "messages":[{"role":"user","content":"hi"}],
+            "thinking":thinking,"output_config":{"effort":effort}});
+        let req: CreateMessageRequest = serde_json::from_value(body.clone()).unwrap();
+        let count: CountMessageTokensRequest = serde_json::from_value(body).unwrap();
+        assert_eq!(req.template_thinking(), Some(enabled));
+        assert_eq!(count.template_thinking(), Some(enabled));
+        assert_eq!(req.reasoning_effort(), Some(normalized));
+        assert_eq!(count.reasoning_effort(), Some(normalized));
+    }
 }

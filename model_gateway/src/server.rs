@@ -29,6 +29,7 @@ use openai_protocol::{
     messages::{CountMessageTokensRequest, CreateMessageRequest},
     multipart::AudioTranscriptionMultipart,
     parser::{ParseFunctionCallRequest, SeparateReasoningRequest},
+    profile::ProviderProfile,
     realtime_session::{
         RealtimeClientSecretCreateRequest, RealtimeSessionCreateRequest,
         RealtimeTranscriptionSessionCreateRequest,
@@ -432,8 +433,13 @@ fn is_anthropic_version(version: &str) -> bool {
 /// above `max_tokens`. The rule reads the `anthropic-beta` header, so it runs
 /// here rather than in the request's own validation.
 fn check_thinking_budget(headers: &HeaderMap, body: &CreateMessageRequest) -> Result<(), Response> {
-    let Some(openai_protocol::messages::ThinkingConfig::Enabled { budget_tokens, .. }) =
-        &body.thinking
+    if ProviderProfile::for_model(&body.model) == ProviderProfile::DeepSeek {
+        return Ok(());
+    }
+    let Some(openai_protocol::messages::ThinkingConfig::Enabled {
+        budget_tokens: Some(budget_tokens),
+        ..
+    }) = &body.thinking
     else {
         return Ok(());
     };

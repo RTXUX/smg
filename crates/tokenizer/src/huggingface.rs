@@ -2506,7 +2506,7 @@ fn apply_deepseek_v41(
     let effort_name = effort_kwarg.and_then(serde_json::Value::as_str);
     // `"none"`/`"minimal"` are the gateway's thinking switch (both project to
     // thinking off everywhere else in SMG), not effort levels.
-    let effort_is_none = matches!(effort_name, Some("none") | Some("minimal"));
+    let effort_is_none = effort_name == Some("none");
     let reasoning_effort = if effort_is_none {
         None
     } else {
@@ -2519,20 +2519,9 @@ fn apply_deepseek_v41(
             .map_err(|e| Error::msg(format!("DeepSeek V4.1 reasoning_effort invalid: {e}")))?
             .flatten()
     };
-    // The effort kwarg's opinion on the mode (step 2 above). Only the names
-    // advertised through `native_reasoning_effort_values()` switch thinking
-    // on: exactly the set the gateway treats as arming the parser.
-    let effort_mode = if effort_is_none {
-        Some(false)
-    } else {
-        effort_name
-            .is_some_and(|name| deepseek_v41::NATIVE_EFFORT_VALUES.contains(&name))
-            .then_some(true)
-    };
-    let thinking_on = explicit_thinking_v41(params)?
-        .or(effort_mode)
-        .or(params.thinking)
-        .unwrap_or(true);
+    // Validate override types even when a typed thinking control takes priority.
+    explicit_thinking_v41(params)?;
+    let thinking_on = deepseek_v41::resolve_thinking(params.template_kwargs, params.thinking);
     let thinking_mode = if thinking_on {
         deepseek_v32::ThinkingMode::Thinking
     } else {

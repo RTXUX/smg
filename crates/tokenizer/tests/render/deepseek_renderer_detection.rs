@@ -761,7 +761,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
             "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}><\u{FF5C}User\u{FF5C}>q<\u{FF5C}Assistant\u{FF5C}></think>"
         );
 
-        let bad_kwargs = HashMap::from([("reasoning_effort".to_string(), json!("turbo"))]);
+        let medium_kwargs = HashMap::from([("reasoning_effort".to_string(), json!("invalid"))]);
         let err = tokenizer
             .apply_chat_template(
                 &messages,
@@ -771,7 +771,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
                     ..Default::default()
                 },
             )
-            .expect_err("expected an error for reasoning_effort=turbo")
+            .expect_err("expected an error for invalid reasoning_effort")
             .to_string();
         assert!(err.contains("Invalid reasoning effort"), "{err}");
     }
@@ -827,18 +827,15 @@ DEFAULT_REASONING_EFFORT = "high""#;
     }
 
     #[test]
-    fn v41_reasoning_effort_minimal_renders_chat_mode_like_none() {
-        // `minimal` is the other spelling of the gateway's thinking switch
-        // (`thinking_from_reasoning_effort` maps both to off); the reference
-        // encoder knows neither, so the shim short-circuits both.
+    fn v41_reasoning_effort_minimal_enables_low_effort() {
+        // Recipe maps minimal to low; only none switches thinking off.
         let (_tmp, tokenizer) = v41_tokenizer();
         let none_kw = HashMap::from([("reasoning_effort".to_string(), json!("none"))]);
         let minimal_kw = HashMap::from([("reasoning_effort".to_string(), json!("minimal"))]);
         let off = render_v41_turn(&tokenizer, Some(&none_kw), None).unwrap();
-        assert_eq!(
-            render_v41_turn(&tokenizer, Some(&minimal_kw), None).unwrap(),
-            off
-        );
+        let low = render_v41_turn(&tokenizer, Some(&minimal_kw), None).unwrap();
+        assert!(low.ends_with(V41_THINKING_TAIL));
+        assert!(low.contains("Reasoning Effort: 25 (range"));
         assert!(off.ends_with(V41_CHAT_TAIL), "{off}");
         // An explicit toggle wins over `minimal` exactly as it wins over `none`.
         let kw = HashMap::from([
@@ -847,7 +844,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
         ]);
         let out = render_v41_turn(&tokenizer, Some(&kw), None).unwrap();
         assert!(out.ends_with(V41_THINKING_TAIL), "{out}");
-        assert!(out.contains("Reasoning Effort: 75 (range"), "{out}");
+        assert!(out.contains("Reasoning Effort: 25 (range"), "{out}");
     }
 
     #[test]
@@ -1128,9 +1125,10 @@ DEFAULT_REASONING_EFFORT = "high""#;
         ] {
             let (_tmp, path) = write_dir(Some(&[architecture]));
             let tokenizer = HuggingFaceTokenizer::from_file(&path).unwrap();
+            let v41 = model.contains("V4.1");
             for (extra, enabled) in [
-                (json!({}), true),
-                (json!({"reasoning_effort":"minimal"}), true),
+                (json!({}), v41),
+                (json!({"reasoning_effort":"minimal"}), v41),
                 (json!({"reasoning_effort":"none"}), false),
                 (
                     json!({"thinking":{"type":"disabled"},"reasoning_effort":"high"}),
@@ -1138,7 +1136,7 @@ DEFAULT_REASONING_EFFORT = "high""#;
                 ),
                 (
                     json!({"thinking":{"type":"enabled"},"reasoning_effort":"none"}),
-                    true,
+                    v41,
                 ),
                 (
                     json!({"chat_template_kwargs":{"enable_thinking":false},"reasoning_effort":"high"}),

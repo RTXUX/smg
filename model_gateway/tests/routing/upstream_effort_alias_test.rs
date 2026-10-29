@@ -115,7 +115,7 @@ mod upstream_effort_alias_tests {
         .await;
         assert_eq!(body["reasoning_effort"], "xhigh", "{body}");
         assert_eq!(
-            body["chat_template_kwargs"]["reasoning_effort"], "medium",
+            body["chat_template_kwargs"]["reasoning_effort"], "xhigh",
             "{body}"
         );
 
@@ -187,7 +187,7 @@ mod upstream_effort_alias_tests {
             let body = recorder.only_body();
             assert_eq!(body["reasoning_effort"], "high", "{side}: {body}");
             assert_eq!(
-                body["chat_template_kwargs"]["reasoning_effort"], "medium",
+                body["chat_template_kwargs"]["reasoning_effort"], "high",
                 "{side}: {body}"
             );
         }

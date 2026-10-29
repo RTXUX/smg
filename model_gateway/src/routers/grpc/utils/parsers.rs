@@ -509,7 +509,7 @@ pub fn messages_reasoning_starts_in_prefill(
     reasoning_starts_in_prefill(
         None,
         request.reasoning_effort(),
-        request.thinking_toggle(),
+        request.template_thinking(),
         continued_final_message,
         tokenizer,
         ProviderProfile::for_model(&request.model),

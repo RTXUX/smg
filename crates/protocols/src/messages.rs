@@ -13,7 +13,7 @@ use crate::{
     chat::deserialize_reasoning_effort,
     common::{self, invalid, CachePartition, GenerationRequest},
     model_card::ModelCard,
-    profile::ProviderProfile,
+    profile::{deepseek, ProviderProfile},
     validated::Normalizable,
 };
 
@@ -113,6 +113,9 @@ pub struct OutputConfig {
 /// else the provider profile's reading of the effort (see
 /// [`crate::chat::ChatCompletionRequest::template_thinking`]).
 fn template_thinking(model: &str, thinking: Option<bool>, effort: Option<&str>) -> Option<bool> {
+    if ProviderProfile::for_model(model) == ProviderProfile::DeepSeek {
+        return Some(deepseek::thinking_enabled(model, thinking, effort));
+    }
     thinking.or_else(|| ProviderProfile::for_model(model).thinking_from_reasoning_effort(effort))
 }
 
@@ -149,7 +152,17 @@ impl CreateMessageRequest {
 
     /// `output_config.effort`, the `reasoning_effort` the template renders.
     pub fn reasoning_effort(&self) -> Option<&str> {
-        self.output_config.as_ref()?.effort.as_deref()
+        self.output_config
+            .as_ref()?
+            .effort
+            .as_deref()
+            .map(|effort| {
+                if ProviderProfile::for_model(&self.model) == ProviderProfile::DeepSeek {
+                    deepseek::normalize_effort(&self.model, effort)
+                } else {
+                    effort
+                }
+            })
     }
 
     /// The thinking preference the `thinking` block states, none without one.
@@ -1097,7 +1110,8 @@ pub enum ThinkingConfig {
     /// Enable extended thinking
     Enabled {
         /// Budget in tokens for thinking (minimum 1024)
-        budget_tokens: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget_tokens: Option<u32>,
         /// How thinking content is returned in the response.
         display: Option<ThinkingDisplay>,
     },
@@ -1648,7 +1662,17 @@ impl CountMessageTokensRequest {
 
     /// `output_config.effort`, the `reasoning_effort` the template renders.
     pub fn reasoning_effort(&self) -> Option<&str> {
-        self.output_config.as_ref()?.effort.as_deref()
+        self.output_config
+            .as_ref()?
+            .effort
+            .as_deref()
+            .map(|effort| {
+                if ProviderProfile::for_model(&self.model) == ProviderProfile::DeepSeek {
+                    deepseek::normalize_effort(&self.model, effort)
+                } else {
+                    effort
+                }
+            })
     }
 
     /// The thinking preference the prompt is rendered with.
@@ -3211,7 +3235,7 @@ mod tests {
         assert!(matches!(
             cfg,
             ThinkingConfig::Enabled {
-                budget_tokens: 1024,
+                budget_tokens: Some(1024),
                 display: None
             }
         ));
@@ -3231,7 +3255,7 @@ mod tests {
                 budget_tokens,
                 display,
             } => {
-                assert_eq!(budget_tokens, 2048);
+                assert_eq!(budget_tokens, Some(2048));
                 assert_eq!(display, Some(ThinkingDisplay::Summarized));
             }
             other => panic!("expected Enabled, got {other:?}"),
@@ -3241,7 +3265,7 @@ mod tests {
     #[test]
     fn test_thinking_config_enabled_round_trip_omits_null_display() {
         let cfg = ThinkingConfig::Enabled {
-            budget_tokens: 1024,
+            budget_tokens: Some(1024),
             display: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();

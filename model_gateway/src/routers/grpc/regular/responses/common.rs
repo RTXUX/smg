@@ -379,6 +379,7 @@ pub(super) fn build_next_request(
         include: current_request.include,
         background: current_request.background,
         reasoning: current_request.reasoning,
+        thinking: current_request.thinking,
         service_tier: current_request.service_tier,
         top_logprobs: current_request.top_logprobs,
         truncation: current_request.truncation,

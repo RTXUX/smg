@@ -22,6 +22,7 @@ use crate::{
         CreateMessageRequest, InputContent, InputContentBlock, InputMessage, Role, ThinkingConfig,
         Tool,
     },
+    profile::ProviderProfile,
 };
 
 /// Fields of a custom tool definition the public API accepts that the typed
@@ -333,8 +334,12 @@ fn validate_tools(tools: Option<&[Tool]>) -> Result<(), ValidationError> {
 /// `max_tokens` depends on the `anthropic-beta` header, so the gateway's
 /// handler checks it.)
 fn validate_thinking(req: &CreateMessageRequest) -> Result<(), ValidationError> {
+    if ProviderProfile::for_model(&req.model) == ProviderProfile::DeepSeek {
+        // deepseek-recipe accepts the field but resolves depth from effort.
+        return Ok(());
+    }
     if let Some(ThinkingConfig::Enabled { budget_tokens, .. }) = &req.thinking {
-        if *budget_tokens < 1024 {
+        if budget_tokens.is_none_or(|budget| budget < 1024) {
             return Err(invalid(
                 "thinking_budget_too_small",
                 "thinking.enabled.budget_tokens: Input should be greater than or equal to 1024"

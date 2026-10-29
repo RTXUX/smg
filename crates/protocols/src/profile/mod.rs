@@ -14,7 +14,7 @@
 //! parts, such as MiniMax's `max_long_side_pixel` and `fps`, are not covered
 //! by that pass and are forwarded as sent.
 
-mod deepseek;
+pub mod deepseek;
 mod kimi;
 mod minimax;
 mod openai;
@@ -869,17 +869,14 @@ mod tests {
                 }
             }
         }
-        // The adaptive thinking type is still no DeepSeek V4 setting.
+        // The pinned recipe accepts adaptive thinking as enabled.
         let mut req = request(
             "deepseek-v4.1-flash",
             named,
             serde_json::json!({"thinking": {"type": "adaptive"}}),
         );
         ProviderProfile::DeepSeek.normalize_chat(&mut req);
-        assert_eq!(
-            code(ProviderProfile::DeepSeek, &req).as_deref(),
-            Some("thinking_type_not_supported")
-        );
+        assert_eq!(code(ProviderProfile::DeepSeek, &req).as_deref(), None);
     }
 
     /// A tool result no call of the assistant turn right before it issued is

@@ -4992,7 +4992,11 @@ mod tests {
         let stage =
             regular_stage(Arc::clone(&registry)).with_queue_timeout(Duration::from_millis(1));
         let mut first = prepared_ctx(Arc::clone(&registry), Some(Instant::now()));
-        stage
+        // Fixture construction is not the queue wait under test. Give the
+        // initial selection ample time; reuse its consumed acceptance stamp
+        // under the tight bound below.
+        regular_stage(Arc::clone(&registry))
+            .with_queue_timeout(Duration::from_secs(60))
             .execute(&mut first)
             .await
             .expect("the first selection");

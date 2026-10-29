@@ -1174,7 +1174,21 @@ impl Format {
             .map(|(source, _, _)| source);
         let block = match block {
             Some(state) => {
-                let Region { open, close, .. } = self.region(state, is_arguments)?;
+                let (open, close) = if let Some(region) = self.region(state, is_arguments) {
+                    (region.open, region.close)
+                } else {
+                    // A block can end in an absorbing framing state instead
+                    // of returning to content. Its invokes remain repeatable.
+                    let (_, open, _) = self.transitions().find(|&(source, _, target)| {
+                        target == state && source != state && !is_arguments(source)
+                    })?;
+                    let (_, close, _) = self.transitions().find(|&(source, _, target)| {
+                        source == state
+                            && self.is_framing(target)
+                            && !self.transitions().any(|(source, _, _)| source == target)
+                    })?;
+                    (self.terminal_text(open), self.terminal_text(close))
+                };
                 Some(Block { state, open, close })
             }
             None => None,

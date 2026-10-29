@@ -382,8 +382,9 @@ impl ResponseStreamEventEmitter {
             })
             .collect();
 
-        // If no items were tracked (legacy path), fall back to generic message
-        let output = if output.is_empty() {
+        // Legacy callers can emit text without tracking an item. Preserve that
+        // text, but an empty generation has no output item to synthesize.
+        let output = if output.is_empty() && !self.accumulated_text.is_empty() {
             vec![json!({
                 "id": std::mem::take(&mut self.message_id),
                 "type": "message",
@@ -1554,6 +1555,31 @@ pub(crate) fn attach_mcp_server_label(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn empty_generations_keep_output_empty_on_the_wire_and_in_storage() {
+        for finish in ["stop", "length", "error"] {
+            let mut emitter = ResponseStreamEventEmitter::new("resp_empty".into(), "m".into(), 0);
+            let (tx, mut rx) = sse_channel();
+            let chunk: ChatCompletionStreamResponse = serde_json::from_value(json!({
+                "id": "chat_empty", "object": "chat.completion.chunk", "created": 0, "model": "m",
+                "choices": [{"index": 0, "delta": {"role": "assistant", "content": "", "reasoning_content": ""}, "finish_reason": finish}]
+            })).unwrap();
+            emitter.process_chunk(&chunk, &tx).await.unwrap();
+            assert!(emitter.finalize(None).output.is_empty());
+            emitter.emit_terminal(None, None, &tx).await.unwrap();
+            drop(tx);
+            let frame = rx.recv().await.unwrap().unwrap();
+            let frame = std::str::from_utf8(&frame).unwrap();
+            let data = frame
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .unwrap();
+            let event: serde_json::Value = serde_json::from_str(data).unwrap();
+            assert_eq!(event["response"]["output"], json!([]), "{finish}");
+            assert!(rx.recv().await.is_none(), "no invented item events");
+        }
+    }
 
     /// The frame of an event: its `type` on the `event:` line and the JSON on
     /// the `data:` line, the text escaped as JSON; an error frame has no

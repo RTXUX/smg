@@ -19,7 +19,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     time::Duration,
 };
@@ -44,6 +44,27 @@ use crate::{
     },
     transport::{run_output_loop, send_message, ConnectedEngine, ConnectedTransport, EngineId},
 };
+
+/// Optional worker-local instrumentation. Callbacks must be short and must
+/// not call back into the client. Borrowed batches avoid cloning token/tensor
+/// payloads. Install before submitting requests; no observer means no tracking.
+pub trait EngineObserver<P: EngineProtocol>: Send + Sync {
+    fn connected(&self, _ranks: &[u32]) {}
+    fn submitted(&self, engine: u32, request: &P::Request);
+    fn batch(&self, batch: &EngineBatch<P::Output>);
+    /// Forget a refused submission, or finish a locally aborted request.
+    fn removed(&self, id: &str, aborted: bool);
+    fn closed(&self);
+}
+
+struct ObserverClose<'a, P: EngineProtocol>(&'a OnceLock<Arc<dyn EngineObserver<P>>>);
+impl<P: EngineProtocol> Drop for ObserverClose<'_, P> {
+    fn drop(&mut self) {
+        if let Some(observer) = self.0.get() {
+            observer.closed();
+        }
+    }
+}
 
 /// The vLLM EngineCore connector (the original engine surface).
 pub type EngineCoreClient = Client<VllmProtocol>;
@@ -380,6 +401,7 @@ struct InputQueueLimit {
 }
 
 struct ClientInner<P: EngineProtocol> {
+    observer: OnceLock<Arc<dyn EngineObserver<P>>>,
     /// Frames for the shared input ROUTER socket, in submission order. The
     /// input writer ([`run_input_writer`]) owns the socket and writes them one
     /// at a time, so a caller that stopped waiting never cancels a write.
@@ -926,6 +948,7 @@ impl<P: EngineProtocol> Client<P> {
         let (abort_tx, abort_rx) = mpsc::unbounded_channel();
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         let inner = Arc::new(ClientInner {
+            observer: OnceLock::new(),
             input_tx,
             send_timeout: Mutex::new(ENGINE_SEND_TIMEOUT),
             input_death_timeout: Mutex::new(ENGINE_INPUT_DEATH_TIMEOUT),
@@ -972,6 +995,23 @@ impl<P: EngineProtocol> Client<P> {
             inner,
             tasks: vec![input_task, output_task, dispatch_task],
         }
+    }
+
+    /// Install instrumentation once, before the first request is submitted.
+    pub fn set_observer(&self, observer: Arc<dyn EngineObserver<P>>) -> bool {
+        let ranks: Vec<_> = self
+            .inner
+            .engines
+            .iter()
+            .filter_map(|engine| engine.engine_id.engine_index())
+            .collect();
+        let mut installed = false;
+        self.inner.observer.get_or_init(|| {
+            observer.connected(&ranks);
+            installed = true;
+            observer
+        });
+        installed
     }
 
     /// The engines connected on this transport.
@@ -1146,6 +1186,9 @@ impl<P: EngineProtocol> Client<P> {
             }
         };
         aux_frames.extend(extra_aux_frames);
+        if let Some(observer) = self.inner.observer.get() {
+            observer.submitted(guard.engine_id.engine_index().unwrap_or_default(), &request);
+        }
         if let Err(error) = self
             .inner
             .send_add_to_engine(&guard.engine_id, payload, aux_frames)
@@ -1183,6 +1226,9 @@ impl<P: EngineProtocol> Client<P> {
     /// Explicitly abort an in-flight request.
     pub async fn abort(&self, engine_id: &EngineId, request_id: &str) -> Result<()> {
         let request_id = request_id.to_string();
+        if let Some(observer) = self.inner.observer.get() {
+            observer.removed(&request_id, true);
+        }
         self.inner.registry.lock().remove_all([&request_id]);
         self.inner.release_one(engine_id, &request_id);
         self.inner.abort(engine_id, &request_id).await
@@ -1320,6 +1366,7 @@ async fn run_dispatcher<P: EngineProtocol>(
     mut abort_rx: mpsc::UnboundedReceiver<(EngineId, String)>,
     inner: Arc<ClientInner<P>>,
 ) {
+    let _observer_close = ObserverClose(&inner.observer);
     let mut consecutive_decode_errors = 0;
     // Positive-liveness watchdog: only output from the engine resets it. The
     // aborts this loop also handles are the client's own events and say
@@ -1355,6 +1402,7 @@ async fn run_dispatcher<P: EngineProtocol>(
                 }
                 match output {
                     Some(Ok(batch)) => {
+                        if let Some(observer) = inner.observer.get() { observer.batch(&batch); }
                         consecutive_decode_errors = 0;
                         inner.note_output();
                         if batch.outputs.is_empty()
@@ -1415,6 +1463,7 @@ async fn run_dispatcher<P: EngineProtocol>(
             }
             abort = abort_rx.recv() => {
                 if let Some((engine_id, request_id)) = abort {
+                    if let Some(observer) = inner.observer.get() { observer.removed(&request_id, true); }
                     inner.registry.lock().remove_all([&request_id]);
                     inner.release_one(&engine_id, &request_id);
                     // Queued, never awaited: the frame goes out in order behind
@@ -1573,6 +1622,9 @@ impl<P: EngineProtocol> SubmitGuard<'_, P> {
     /// later read the add frame.
     fn take_back(&mut self, abort: bool) {
         self.armed = false;
+        if let Some(observer) = self.inner.observer.get() {
+            observer.removed(&self.request_id, false);
+        }
         self.inner.registry.lock().remove_all([&self.request_id]);
         self.inner.release_one(&self.engine_id, &self.request_id);
         if abort {

@@ -114,6 +114,11 @@ impl VllmGenerateStream {
         }
     }
 
+    /// The engine request id (one id per sampled choice).
+    pub fn request_id(&self) -> &str {
+        self.inner.request_id()
+    }
+
     /// The choice `index` stamped on this stream's responses.
     pub fn index(&self) -> u32 {
         self.index

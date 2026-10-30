@@ -555,6 +555,23 @@ async fn string_stops_are_matched_by_the_servicer() {
     // The engine is still generating from its point of view: it gets the
     // abort for the choice the servicer ended.
     assert_eq!(recv_abort(&mut h.engine_in).await, vec!["r3".to_string()]);
+    let metrics = h
+        .client
+        .get_metrics(common::GetMetricsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .prometheus_text;
+    assert!(metrics
+        .lines()
+        .any(|s| s.starts_with("vllm:request_success_total{")
+            && s.contains("finished_reason=\"stop\"")
+            && s.ends_with(" 1")));
+    assert!(metrics
+        .lines()
+        .any(|s| s.starts_with("vllm:request_success_total{")
+            && s.contains("finished_reason=\"abort\"")
+            && s.ends_with(" 0")));
 }
 
 /// A stop string that is one token (`world` is mock token 2) also reaches
@@ -3399,4 +3416,97 @@ async fn embed_priority_is_negated_on_the_engine_wire() {
     });
     response.unwrap();
     assert_eq!(core.priority, 2_147_483_648);
+}
+
+/// Exercise the full native path: EngineCore msgpack -> connector observer ->
+/// isolated registry -> generated gRPC GetMetrics response.
+#[tokio::test]
+async fn native_metrics_round_trip_and_disabled_stats() {
+    for enabled in [true, false] {
+        let mut model = model_info();
+        model.log_stats = Some(enabled);
+        let mut h = harness(model, None).await;
+        let mut stream = h
+            .client
+            .generate(generate_request("metrics", true, Vec::new()))
+            .await
+            .unwrap()
+            .into_inner();
+        recv_add(&mut h.engine_in).await;
+        let mut stats = SchedulerStats {
+            num_running_reqs: 1,
+            num_waiting_reqs: 2,
+            num_skipped_waiting_reqs: 3,
+            kv_cache_usage: 0.25,
+            ..Default::default()
+        };
+        stats.prefix_cache_stats.base.queries = 30;
+        stats.prefix_cache_stats.base.hits = 10;
+        h.engine_out
+            .send_outputs(&batch("metrics", vec![10], None, Some(stats)))
+            .await
+            .unwrap();
+        stream.message().bounded().await.unwrap().unwrap();
+        let first = h
+            .client
+            .get_metrics(common::GetMetricsRequest {})
+            .await
+            .unwrap()
+            .into_inner()
+            .prometheus_text;
+        if enabled {
+            assert!(
+                first
+                    .lines()
+                    .any(|s| s.starts_with("vllm:num_requests_waiting{") && s.ends_with(" 5")),
+                "{first}"
+            );
+            assert!(first
+                .lines()
+                .any(|s| s.starts_with("vllm:prefix_cache_hits_total{") && s.ends_with(" 10")));
+        } else {
+            assert!(first.is_empty());
+        }
+        let again = h
+            .client
+            .get_metrics(common::GetMetricsRequest {})
+            .await
+            .unwrap()
+            .into_inner()
+            .prometheus_text;
+        assert_eq!(first, again);
+        h.engine_out
+            .send_outputs(&batch(
+                "metrics",
+                vec![11, 12],
+                Some(EngineCoreFinishReason::Length),
+                None,
+            ))
+            .await
+            .unwrap();
+        while stream.message().bounded().await.unwrap().is_some() {}
+        let final_metrics = h
+            .client
+            .get_metrics(common::GetMetricsRequest {})
+            .await
+            .unwrap()
+            .into_inner()
+            .prometheus_text;
+        if enabled {
+            assert!(final_metrics
+                .lines()
+                .any(|s| s.starts_with("vllm:generation_tokens_total{") && s.ends_with(" 3")));
+            assert!(final_metrics
+                .lines()
+                .any(|s| s.starts_with("vllm:request_success_total{")
+                    && s.contains("finished_reason=\"length\"")
+                    && s.ends_with(" 1")));
+            assert!(final_metrics
+                .lines()
+                .any(|s| s.starts_with("vllm:prefix_cache_hits_total{") && s.ends_with(" 10")));
+        } else {
+            assert!(final_metrics.is_empty());
+        }
+        h.server.stop(Duration::from_secs(5)).unwrap();
+    }
 }

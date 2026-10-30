@@ -47,7 +47,8 @@ on the worker together with this servicer.
 
 ```bash
 curl http://localhost:30000/engine_metrics
-grpcurl -plaintext -d '{}' localhost:50051 vllm.grpc.engine.VllmEngine/GetMetrics
+grpcurl -plaintext -import-path crates/grpc_client/proto -proto vllm_engine.proto \
+  -d '{}' localhost:50051 vllm.grpc.engine.VllmEngine/GetMetrics
 ```
 
 Each scrape collects every base worker once, preserving native metric names,
@@ -62,6 +63,38 @@ This endpoint is separate from the gateway's `/metrics` listener and its
 lightweight `smg_engine_*` load gauges. When scraping several gateway replicas,
 deduplicate worker series or designate one collector to avoid counting each
 worker repeatedly.
+
+The Rust servicer also implements `GetMetrics`, using a per-servicer registry
+fed directly from EngineCore output batches. Its native `vllm:*` metrics cover:
+
+- Running/waiting requests (including deferred waiting), KV utilization,
+  local/external prefix-cache queries and hits.
+- Prompt/generation token counters, prompt token sources and cached tokens,
+  request completion reasons and preemptions.
+- TTFT, inter-token latency, end-to-end latency, queue/prefill/decode/inference
+  times, mean time per output token, request token counts, max-token parameters,
+  per-request preemptions, computed prefill KV tokens and tokens per iteration.
+- Speculative drafts, drafted/accepted tokens and per-position acceptance when
+  speculative decoding is configured; sampled KV residency histograms when
+  `--kv-cache-metrics` is enabled; corrupted-request counts when NaN checking
+  is enabled.
+
+Names, labels (`model_name`, `engine`), cumulative values and histogram bucket
+families follow Python vLLM. The launcher forwards resolved bucket settings,
+including custom overrides. Both clocks retain their upstream meanings:
+TTFT/end-to-end use frontend wall time; engine phase times and inter-token
+latency use EngineCore monotonic timestamps. String stops count as `stop`;
+client cancellation counts as `abort`. `--disable-log-stats` disables the Rust
+registry and returns an empty successful snapshot.
+
+This is not complete Python registry parity. Rust does not export Python
+process/GC collectors, model/cache configuration info, frontend admission and
+`n`/maximum-choice histograms, LoRA/MM-processor metrics, sleep state,
+connector-specific transfer metrics, priority-pause/KV-wait extensions,
+GPU/performance metrics, or diffusion-specific metrics. These families are
+absent. The committed reference fixture under
+`crates/engine_servicer/tests/fixtures/` checks the supported families against
+Python vLLM, and the servicer tests exercise the EngineCore-to-gRPC path.
 
 #### Numeric request priority
 

@@ -1549,3 +1549,34 @@ def test_the_switch_answers_a_configuration_error_with_exit_code_2(monkeypatch, 
         asyncio.run(switched(argparse.Namespace(servicer_impl="rust")))
     assert raised.value.code == 2 and calls == []
     assert "SMG_VLLM_SERVICER_DRAIN_SECS='abc' is not a number" in caplog.text
+
+
+def test_metrics_settings_resolve_vllm_buckets_and_observability_flags(monkeypatch):
+    config = _config()
+    config.observability_config = SimpleNamespace(
+        kv_cache_metrics=True, custom_histogram_buckets={"time_to_first_token": [0.1, 1.0]}
+    )
+    config.speculative_config = SimpleNamespace(num_speculative_tokens=5)
+    config.model_config.max_model_len = 4096
+    seen = []
+
+    def buckets(family, *, max_model_len, overrides):
+        seen.append((family, max_model_len))
+        return overrides.get(family, [1, 2, 5])
+
+    _install(
+        monkeypatch,
+        "vllm.v1.metrics.buckets",
+        BUCKET_FAMILY_KEYS={"time_to_first_token", "request_tokens"},
+        histogram_buckets=buckets,
+    )
+    monkeypatch.setenv("VLLM_COMPUTE_NANS_IN_LOGITS", "1")
+    result = json.loads(rust.model_info_from_config(config)["metrics_config_json"])
+    assert result == {
+        "histogram_buckets": {"time_to_first_token": [0.1, 1.0], "request_tokens": [1, 2, 5]},
+        "kv_cache_metrics": True,
+        "compute_nans": True,
+        "num_speculative_tokens": 5,
+        "is_diffusion": False,
+    }
+    assert sorted(seen) == [("request_tokens", 4096), ("time_to_first_token", 4096)]

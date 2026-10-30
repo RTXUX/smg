@@ -7,6 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/smg-project/smg"
 
 [dependencies]
+prometheus = { version = "0.14", default-features = false }
 engine-zmq-adapter.workspace = true
 engine-zmq-client.workspace = true
 smg-grpc-client.workspace = true

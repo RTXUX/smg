@@ -36,6 +36,13 @@ use crate::{
     },
 };
 
+/// A request batch's native telemetry. Scheduler counters are deltas and must
+/// be consumed once per batch, even if there are no request outputs.
+pub struct VllmTelemetry {
+    pub timestamp: f64,
+    pub scheduler_stats: Option<Box<SchedulerStats>>,
+}
+
 /// Map vLLM's piggybacked scheduler stats onto the engine-neutral load signal.
 impl From<SchedulerStats> for EngineLoad {
     fn from(stats: SchedulerStats) -> Self {
@@ -149,7 +156,15 @@ impl EngineProtocol for VllmProtocol {
                     .finished_requests
                     .map(|ids| ids.into_iter().collect())
                     .unwrap_or_default(),
-                load: batch.scheduler_stats.map(|stats| EngineLoad::from(*stats)),
+                load: batch.scheduler_stats.as_deref().map(|stats| EngineLoad {
+                    num_running: stats.num_running_reqs,
+                    num_waiting: stats.num_waiting_reqs,
+                    kv_cache_usage: stats.kv_cache_usage,
+                }),
+                vllm_telemetry: Some(VllmTelemetry {
+                    timestamp: batch.timestamp,
+                    scheduler_stats: batch.scheduler_stats,
+                }),
                 wave: None,
                 utility: None,
             }),

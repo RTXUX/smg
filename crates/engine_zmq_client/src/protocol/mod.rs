@@ -73,6 +73,8 @@ pub trait EngineOutput {
 /// signal and any out-of-band finished ids. The connector consumes this shape
 /// for every protocol.
 pub struct EngineBatch<O> {
+    /// Native vLLM statistics before the routing load projection discards them.
+    pub vllm_telemetry: Option<vllm::VllmTelemetry>,
     /// The DP rank / ZMQ index the batch came from.
     pub engine_index: u32,
     /// Per-request outputs produced in this tick.
@@ -94,6 +96,7 @@ pub struct EngineBatch<O> {
 impl<O> Default for EngineBatch<O> {
     fn default() -> Self {
         Self {
+            vllm_telemetry: None,
             engine_index: 0,
             outputs: Vec::new(),
             finished_request_ids: Vec::new(),

@@ -92,6 +92,40 @@ MULTIPROC_METHOD_ENV = "VLLM_WORKER_MULTIPROC_METHOD"
 HOOK_SYMBOL = "resolve_servicer_impl"
 
 
+def metrics_config_from_vllm(vllm_config: Any) -> str:
+    """Resolve metrics settings once; Rust owns recording and exposition."""
+    observability = getattr(vllm_config, "observability_config", None)
+    overrides = getattr(observability, "custom_histogram_buckets", None) or {}
+    buckets = dict(overrides)
+    try:
+        from vllm.v1.metrics.buckets import BUCKET_FAMILY_KEYS, histogram_buckets
+    except ImportError:
+        # Older supported vLLM versions keep bucket defaults in loggers.py.
+        # Rust carries the standard defaults for those launchers.
+        pass
+    else:
+        buckets = {
+            family: list(
+                histogram_buckets(
+                    family,
+                    max_model_len=getattr(vllm_config.model_config, "max_model_len", 0),
+                    overrides=overrides,
+                )
+            )
+            for family in BUCKET_FAMILY_KEYS
+        }
+    speculative = getattr(vllm_config, "speculative_config", None)
+    return json.dumps(
+        {
+            "histogram_buckets": buckets,
+            "kv_cache_metrics": bool(getattr(observability, "kv_cache_metrics", False)),
+            "compute_nans": os.environ.get("VLLM_COMPUTE_NANS_IN_LOGITS", "0") == "1",
+            "num_speculative_tokens": int(getattr(speculative, "num_speculative_tokens", 0) or 0),
+            "is_diffusion": bool(getattr(vllm_config.model_config, "is_diffusion", False)),
+        }
+    )
+
+
 def model_info_from_config(vllm_config: Any, *, log_stats: bool | None = None) -> dict[str, Any]:
     """`VllmGrpcServer` keyword arguments from vLLM's own config: the facts
     both servicers advertise (`model_facts`, `server_facts`), plus the inputs
@@ -136,6 +170,7 @@ def model_info_from_config(vllm_config: Any, *, log_stats: bool | None = None) -
         "engine_reasoning_parser": engine_reasoning_parser(vllm_config),
         "constrained_decoding_start": constrained_decoding_start(vllm_config),
         "log_stats": log_stats,
+        "metrics_config_json": metrics_config_from_vllm(vllm_config),
     }
 
 

@@ -184,6 +184,7 @@ impl EngineProtocol for SglangProtocol {
             .map(|output| output.request_id.clone())
             .collect();
         Ok(EngineBatch {
+            vllm_telemetry: None,
             engine_index,
             outputs,
             finished_request_ids,

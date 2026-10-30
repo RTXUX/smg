@@ -95,9 +95,17 @@ impl VllmEngine for VllmEngineService {
         &self,
         _request: Request<common::GetMetricsRequest>,
     ) -> Result<Response<common::GetMetricsResponse>, Status> {
-        Err(Status::unimplemented(
-            "native metrics are not implemented yet",
-        ))
+        let metrics = self.state.metrics.clone();
+        let prometheus_text = tokio::task::spawn_blocking(move || {
+            metrics.as_ref().map(|metrics| metrics.render()).transpose()
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))?
+        .map_err(|error| Status::internal(error.to_string()))?
+        .unwrap_or_default();
+        Ok(Response::new(common::GetMetricsResponse {
+            prometheus_text,
+        }))
     }
 
     async fn get_tokenizer(

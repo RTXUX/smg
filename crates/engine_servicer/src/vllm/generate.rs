@@ -427,6 +427,9 @@ impl Stream for ChoiceStream {
                         // already holds the accumulated ids and logprobs; let
                         // it through instead of synthesizing an empty one.
                         if !inner.has_parked_complete() {
+                            if let Some(metrics) = &this.state.metrics {
+                                metrics.frontend_finished(inner.request_id(), "stop");
+                            }
                             this.pending = Some(inner.complete_with_matched_stop(matched));
                         }
                     }

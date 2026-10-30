@@ -77,6 +77,17 @@ pub(super) async fn connect_engine(
     .await
     {
         Ok(client) => {
+            if let Some(metrics) = &state.metrics {
+                match client.observe_vllm(metrics.clone()) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        let message = format!("Failed to install native metrics: {error}");
+                        state.engine.fail(message.clone());
+                        record_error(&last_error, message);
+                        return;
+                    }
+                }
+            }
             client.adopt_tokenizer_eos(state.tokenizer());
             client.set_structured_outputs_backend(structured_outputs_backend_from_config(
                 &state.model.structured_outputs_backend,

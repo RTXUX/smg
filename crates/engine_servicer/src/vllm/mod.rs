@@ -27,6 +27,8 @@ mod engine;
 mod generate;
 mod info;
 mod media;
+mod metrics;
+pub use metrics::MetricsConfig;
 mod service;
 #[cfg(test)]
 mod tests;
@@ -155,6 +157,8 @@ pub struct VllmModelInfo {
     /// the launcher did not say (an older one): the wire is then classified
     /// by what it shows.
     pub log_stats: Option<bool>,
+    /// Native Prometheus instrumentation settings supplied by the launcher.
+    pub metrics_config: MetricsConfig,
 }
 
 /// How to bind, where the engine dials in, and what to advertise.
@@ -249,6 +253,7 @@ pub(super) struct State {
     /// are off (`SubscribeKvEvents` is then UNIMPLEMENTED).
     pub(super) kv_relay: Option<Arc<crate::kv_events::KvEventRelay>>,
     pub(super) stats: Stats,
+    metrics: Option<Arc<metrics::VllmMetrics>>,
     /// Queued token-work, generation throughput and hit rate from the
     /// requests this servicer forwards, for `GetLoads`.
     pub(super) loads: crate::load_tracker::LoadTracker,
@@ -373,7 +378,20 @@ impl VllmServicerServer {
             Some(&config.model.kv_events_replay_endpoint),
             &config.model.kv_events_topic,
         );
+        let metrics = if config.model.log_stats == Some(false) {
+            None
+        } else {
+            Some(Arc::new(
+                metrics::VllmMetrics::new(
+                    config.model.served_model_name.clone(),
+                    config.model.max_context_length,
+                    config.model.metrics_config.clone(),
+                )
+                .map_err(|error| invalid(&format!("metrics: {error}")))?,
+            ))
+        };
         let state = Arc::new(State {
+            metrics,
             tokenizer_dir: config.tokenizer_dir.clone(),
             model: config.model,
             kv_relay,

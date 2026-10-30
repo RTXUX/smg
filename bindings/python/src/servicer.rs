@@ -621,6 +621,7 @@ impl PyVllmGrpcServer {
         engine_reasoning_parser = String::new(),
         constrained_decoding_start = String::new(),
         log_stats = None,
+        metrics_config_json = String::new(),
         media_processor = None,
         smg_media_processor = None,
         engine_startup_timeout_secs = None,
@@ -669,6 +670,7 @@ impl PyVllmGrpcServer {
         engine_reasoning_parser: String,
         constrained_decoding_start: String,
         log_stats: Option<bool>,
+        metrics_config_json: String,
         media_processor: Option<Bound<'_, PyAny>>,
         smg_media_processor: Option<Bound<'_, PyDict>>,
         engine_startup_timeout_secs: Option<f64>,
@@ -724,6 +726,13 @@ impl PyVllmGrpcServer {
             engine_reasoning_parser,
             constrained_decoding_start,
             log_stats,
+            metrics_config: if metrics_config_json.is_empty() {
+                Default::default()
+            } else {
+                serde_json::from_str(&metrics_config_json).map_err(|error| {
+                    PyValueError::new_err(format!("invalid metrics_config_json: {error}"))
+                })?
+            },
         };
         let mut config = VllmServicerConfig {
             bind_address,

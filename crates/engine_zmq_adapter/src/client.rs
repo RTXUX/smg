@@ -12,11 +12,11 @@ use std::{
 use engine_zmq_client::{
     codec::OpaqueValue,
     connect_handshake,
-    connector::{EngineCoreClient, SglangClient, TokenSpeedClient},
+    connector::{EngineCoreClient, EngineObserver, SglangClient, TokenSpeedClient},
     protocol::{
         handshake::EngineCoreReadyResponse,
         sglang::request::SglangRequest,
-        vllm::{request::EngineCoreRequest, sampling::EngineCoreSamplingParams},
+        vllm::{request::EngineCoreRequest, sampling::EngineCoreSamplingParams, VllmProtocol},
         EngineLoad,
     },
     ConnectedEngine, StartupBudget,
@@ -397,6 +397,19 @@ impl ZmqEngineClient {
             ZmqBackend::TokenSpeed(client) => client.engines(),
             ZmqBackend::Sglang(client) => client.engines(),
         }
+    }
+
+    /// Attach native vLLM instrumentation before accepting requests.
+    pub fn observe_vllm(
+        &self,
+        observer: Arc<dyn EngineObserver<VllmProtocol>>,
+    ) -> Result<(), tonic::Status> {
+        if !self.vllm_client("native metrics")?.set_observer(observer) {
+            return Err(tonic::Status::already_exists(
+                "vLLM metrics observer already installed",
+            ));
+        }
+        Ok(())
     }
 
     /// The vLLM EngineCore client behind this connection, for RPCs only the

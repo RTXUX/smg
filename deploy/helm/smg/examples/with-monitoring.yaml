@@ -1,4 +1,4 @@
-# Router with Prometheus ServiceMonitor, Grafana dashboard and alerting rules.
+# Gateway and HTTP engine metrics, Grafana dashboard and alerting rules.
 # Usage: helm install smg deploy/helm/smg -f deploy/helm/smg/examples/with-monitoring.yaml
 router:
   workerUrls:
@@ -9,6 +9,9 @@ router:
       interval: 15s
       labels:
         release: prometheus
+      engineMetrics:
+        enabled: true
+        scrapeTimeout: 10s
 grafana:
   dashboard:
     enabled: true

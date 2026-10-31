@@ -70,6 +70,32 @@ See [`values.yaml`](values.yaml) for the full list of configurable parameters.
 
 `cache_aware` (default), `round_robin`, `power_of_two`, `consistent_hashing`, `prefix_hash`, `manual`, `random`, `bucket`
 
+### Metrics
+
+With the Prometheus Operator installed, set `router.metrics.serviceMonitor.enabled: true` to scrape the gateway's `/metrics` endpoint on the named `metrics` port (default 29000).
+
+To also collect native worker metrics through the gateway, enable the second ServiceMonitor endpoint:
+
+```yaml
+router:
+  metrics:
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      labels:
+        release: prometheus  # match your Prometheus ServiceMonitor selector
+      engineMetrics:
+        enabled: true
+        interval: ""         # inherit serviceMonitor.interval
+        scrapeTimeout: 10s   # optional; must not exceed the scrape interval
+```
+
+Engine metrics are opt-in and use `/engine_metrics` on the Service's named `http` port. This aggregates `/metrics` from registered HTTP workers, including external `router.workerUrls`. No additional router flag is required. The engine interval defaults to `serviceMonitor.interval`; an empty `scrapeTimeout` uses Prometheus's configured timeout.
+
+For gRPC workers, use the separate HTTP metrics listener and worker ServiceMonitor described in [Worker Metrics](#worker-metrics-grpc-mode). This gateway aggregation does not use a gRPC metrics RPC.
+
+The gateway preserves native metric names and labels and adds `worker_addr`. Each selected router replica collects its registered HTTP workers, so replicas sharing workers produce duplicate worker series. Deduplicate those series when aggregating, or collect them through a single gateway. Failed worker scrapes are omitted; the endpoint returns HTTP 500 when no worker scrape succeeds.
+
 ### Workers
 
 Each entry in `workers[]` creates a Deployment + Service:
@@ -322,7 +348,7 @@ Size the budget past the longest load you expect: a startup probe that fails for
 | [`with-consul-discovery.yaml`](examples/with-consul-discovery.yaml) | Workers from Consul, token and CA from Secrets |
 | [`with-slurm-discovery.yaml`](examples/with-slurm-discovery.yaml) | Workers on Slurm job nodes (custom image) |
 | [`with-ingress.yaml`](examples/with-ingress.yaml) | Ingress with TLS |
-| [`with-monitoring.yaml`](examples/with-monitoring.yaml) | ServiceMonitor + Grafana dashboard + PrometheusRule |
+| [`with-monitoring.yaml`](examples/with-monitoring.yaml) | Gateway and HTTP engine ServiceMonitor endpoints + Grafana dashboard + PrometheusRule |
 
 ## Testing
 

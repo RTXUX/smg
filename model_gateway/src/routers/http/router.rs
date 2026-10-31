@@ -64,8 +64,8 @@ use crate::{
             attempt_ledger::{mark_upstream_answer, AttemptLedger},
             body_policy::{
                 decide_body_path, BodyPath, BodyPathInputs, BODY_PATH_BUFFERED, BODY_PATH_STREAMED,
-                REASON_MODEL_AMBIGUOUS, REASON_MODEL_SELECTION, REASON_NO_AVAILABLE_WORKER,
-                REASON_WORKER_MUTATES_BODY,
+                REASON_ANTHROPIC_PREAMBLE, REASON_MODEL_AMBIGUOUS, REASON_MODEL_SELECTION,
+                REASON_NO_AVAILABLE_WORKER, REASON_WORKER_MUTATES_BODY,
             },
             decisions::{SglangDecisionAdapter, UPSTREAM_ROUTE},
             header_utils, overload,
@@ -846,7 +846,7 @@ impl Router {
                             return Err(error::method_not_allowed(
                                 "unsupported_method",
                                 "Unsupported method for simple routing",
-                            ))
+                            ));
                         }
                     };
 
@@ -2224,6 +2224,11 @@ where
         let Some(route) = streamable_route(req.uri().path()) else {
             return Either::Left(self.inner.call(req));
         };
+        // Normalization runs in the typed Messages handler, before forwarding.
+        if route == "/v1/messages" && crate::config::strip_anthropic_preamble_enabled() {
+            Metrics::record_request_body_path(BODY_PATH_BUFFERED, REASON_ANTHROPIC_PREAMBLE);
+            return Either::Left(self.inner.call(req));
+        }
         let resolved = match self.state.forward_capable_router() {
             Ok(resolved) => resolved,
             Err(reason) => {

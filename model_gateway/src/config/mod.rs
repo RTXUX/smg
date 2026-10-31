@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 pub(crate) mod bounds;
 pub mod builder;
 pub mod types;
@@ -48,6 +50,20 @@ impl ConfigError {
 }
 
 pub type ConfigResult<T> = Result<T, ConfigError>;
+
+/// Process-wide opt-in, read once so request-body forwarding and the
+/// Messages handlers always agree on whether normalization is required.
+pub(crate) fn strip_anthropic_preamble_enabled() -> bool {
+    static ENABLED: LazyLock<bool> = LazyLock::new(|| {
+        std::env::var("SMG_STRIP_ANTHROPIC_PREAMBLE").is_ok_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on" | "yes"
+            )
+        })
+    });
+    *ENABLED
+}
 
 #[cfg(test)]
 mod config_error_tests {

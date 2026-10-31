@@ -27,6 +27,7 @@ pub(crate) const REASON_POLICY_NEEDS_TEXT: &str = "policy_needs_text";
 pub(crate) const REASON_MODEL_AMBIGUOUS: &str = "model_ambiguous";
 pub(crate) const REASON_WORKER_MUTATES_BODY: &str = "worker_mutates_body";
 pub(crate) const REASON_WASM_REQUEST_HOOK: &str = "wasm_request_hook";
+pub(crate) const REASON_ANTHROPIC_PREAMBLE: &str = "anthropic_preamble";
 pub(crate) const REASON_NO_CONTENT_LENGTH: &str = "no_content_length";
 pub(crate) const REASON_NO_AVAILABLE_WORKER: &str = "no_available_worker";
 pub(crate) const REASON_MODEL_SELECTION: &str = "model_selection";

@@ -75,6 +75,16 @@ smg launch --worker-urls http://gpu1:8000 --enable-mesh \
   --mesh-advertise-host 10.0.0.1 --mesh-peer-urls 10.0.0.2:39527
 ```
 
+Set `SMG_STRIP_ANTHROPIC_PREAMBLE=true` before starting SMG to remove Claude
+Code's leading `x-anthropic-billing-header:` line from system prompts on
+`/v1/messages` and `/v1/messages/count_tokens`. This avoids session-specific
+prefixes disrupting prompt caching. The setting defaults off; `1`, `true`,
+`on`, and `yes` enable it (case-insensitive, surrounding whitespace ignored).
+It is read once per process. Stripping requires a terminating newline and
+preserves the remaining text and text-block metadata; for block prompts,
+only the first block is inspected. Enabled Messages requests use the buffered
+body path, bounded by `--max-payload-size`, including when streaming responses.
+
 **Use** — send requests to the gateway:
 
 ```bash

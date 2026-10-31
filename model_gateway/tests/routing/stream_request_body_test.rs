@@ -7,7 +7,7 @@
 //! more than one model, the buffered typed path (which re-serializes and
 //! sends a Content-Length) must be used instead.
 
-use std::sync::Arc;
+use std::{process::Command, sync::Arc};
 
 use axum::{
     body::{Body, Bytes},
@@ -16,6 +16,7 @@ use axum::{
         header::{CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING},
         HeaderMap, StatusCode,
     },
+    response::{IntoResponse, Response},
     Json,
 };
 use futures_util::stream;
@@ -41,14 +42,25 @@ type Captured = Arc<Mutex<Vec<(HeaderMap, Bytes)>>>;
 async fn spawn_capture_worker() -> (String, Captured) {
     let captured: Captured = Arc::new(Mutex::new(Vec::new()));
 
-    async fn capture(State(sink): State<Captured>, headers: HeaderMap, body: Bytes) -> Json<Value> {
+    async fn capture(State(sink): State<Captured>, headers: HeaderMap, body: Bytes) -> Response {
+        let payload: Value = serde_json::from_slice(&body).unwrap();
         sink.lock().await.push((headers, body));
-        Json(json!({"text": "ok"}))
+        if payload["stream"] == true {
+            (
+                [(CONTENT_TYPE, "text/event-stream")],
+                "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+            )
+                .into_response()
+        } else {
+            Json(json!({"text": "ok"})).into_response()
+        }
     }
 
     let app = axum::Router::new()
         .route("/generate", axum::routing::post(capture))
         .route("/v1/chat/completions", axum::routing::post(capture))
+        .route("/v1/messages", axum::routing::post(capture))
+        .route("/v1/messages/count_tokens", axum::routing::post(capture))
         // Outsize axum's 2MB default so multi-MiB streamed forwards land.
         .layer(axum::extract::DefaultBodyLimit::max(256 * 1024 * 1024))
         .with_state(Arc::clone(&captured));
@@ -155,6 +167,155 @@ fn chunked_json_request(uri: &str, payload: Vec<u8>, content_length: Option<u64>
     builder
         .body(Body::from_stream(stream::iter(chunks)))
         .unwrap()
+}
+
+/// Each environment value gets a fresh process: the production setting is
+/// cached, and changing the parent environment would race unrelated tests.
+#[tokio::test]
+async fn anthropic_preamble_env_controls_both_endpoints() {
+    const CHILD: &str = "SMG_PREAMBLE_TEST_EXPECT_ENABLED";
+    const ENV: &str = "SMG_STRIP_ANTHROPIC_PREAMBLE";
+    const TEST: &str =
+        "routing::stream_request_body_test::anthropic_preamble_env_controls_both_endpoints";
+    let Ok(expected) = std::env::var(CHILD) else {
+        for (value, enabled) in [
+            (None, false),
+            (Some(""), false),
+            (Some("0"), false),
+            (Some("false"), false),
+            (Some("off"), false),
+            (Some("no"), false),
+            (Some("invalid"), false),
+            (Some("1"), true),
+            (Some("true"), true),
+            (Some("on"), true),
+            (Some("yes"), true),
+            (Some("  TrUe \t"), true),
+        ] {
+            let mut child = Command::new(std::env::current_exe().unwrap());
+            child
+                .args([TEST, "--exact", "--nocapture"])
+                .env(CHILD, enabled.to_string())
+                .env_remove(ENV);
+            if let Some(value) = value {
+                child.env(ENV, value);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{ENV}={value:?}:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    };
+    let enabled = expected == "true";
+
+    // Exercise both the normal buffered path and requests eligible to stream
+    // their raw bodies (past the buffer cap or with retries disabled).
+    for (cap, disable_retries) in [(1024 * 1024, false), (0, false), (1024 * 1024, true)] {
+        let mut config = base_config(1024 * 1024);
+        config.max_buffered_request_bytes = cap;
+        config.disable_retries = disable_retries;
+        let (app, captured, ctx) = streaming_app_with_config(least_load_policy(), config).await;
+        let raw_body_eligible = cap == 0 || disable_retries;
+
+        for (system, stripped) in [
+            (
+                json!(" \nx-anthropic-billing-header: session\r\n  You are helpful."),
+                json!("  You are helpful."),
+            ),
+            (
+                json!([
+                    {"type": "text", "text": "x-anthropic-billing-header: session\nPrompt",
+                     "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": "x-anthropic-billing-header: later\nKeep this."}
+                ]),
+                json!([
+                    {"type": "text", "text": "Prompt", "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": "x-anthropic-billing-header: later\nKeep this."}
+                ]),
+            ),
+            (Value::Null, Value::Null),
+        ] {
+            for (route, stream) in [
+                ("/v1/messages", false),
+                ("/v1/messages", true),
+                ("/v1/messages/count_tokens", false),
+            ] {
+                let mut payload = json!({
+                    "model": "mock-model",
+                    "system": system,
+                    "messages": [{"role": "user", "content": "x-anthropic-billing-header: user\nKeep me."}]
+                });
+                if route == "/v1/messages" {
+                    payload["max_tokens"] = json!(32);
+                    payload["stream"] = json!(stream);
+                }
+                let bytes = serde_json::to_vec(&payload).unwrap();
+                let response = app
+                    .clone()
+                    .oneshot(chunked_json_request(
+                        route,
+                        bytes.clone(),
+                        Some(bytes.len() as u64),
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                if stream {
+                    assert_eq!(response.headers()[CONTENT_TYPE], "text/event-stream");
+                }
+                let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                if stream {
+                    assert!(std::str::from_utf8(&response_body)
+                        .unwrap()
+                        .contains("event: message_stop"));
+                }
+                let (headers, body) = captured.lock().await.pop().expect("forwarded request");
+                let forwarded: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(
+                    &forwarded["system"],
+                    if enabled { &stripped } else { &system }
+                );
+                assert_eq!(forwarded["messages"], payload["messages"]);
+                let buffered = enabled || !raw_body_eligible || route.ends_with("/count_tokens");
+                assert_eq!(
+                    headers.contains_key(CONTENT_LENGTH),
+                    buffered,
+                    "{route}, enabled={enabled}, cap={cap}, disable_retries={disable_retries}"
+                );
+                if !buffered {
+                    assert_eq!(body.as_ref(), bytes.as_slice());
+                }
+            }
+        }
+
+        // The switch must not force other APIs to buffer or alter their prompts.
+        let payload = serde_json::to_vec(&json!({
+            "model": "mock-model",
+            "messages": [{"role": "system", "content": "x-anthropic-billing-header: chat\nKeep me."}]
+        })).unwrap();
+        let response = app
+            .oneshot(chunked_json_request(
+                "/v1/chat/completions",
+                payload.clone(),
+                Some(payload.len() as u64),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let (headers, body) = captured.lock().await.pop().unwrap();
+        assert_eq!(headers.contains_key(CONTENT_LENGTH), !raw_body_eligible);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["messages"],
+            serde_json::from_slice::<Value>(&payload).unwrap()["messages"]
+        );
+        ctx.shutdown().await;
+    }
 }
 
 #[tokio::test]

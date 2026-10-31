@@ -59,7 +59,7 @@ pub(crate) mod tls;
 
 use crate::{
     app_context::AppContext,
-    config::{ParserChoice, RouterConfig},
+    config::{strip_anthropic_preamble_enabled, ParserChoice, RouterConfig},
     endpoints::{conversations, models, parse, responses as response_handlers, tokenize},
     mesh::{
         discovery::{start_mesh_discovery, MeshDiscoveryConfig},
@@ -458,13 +458,18 @@ async fn v1_messages(
     headers: HeaderMap,
     Extension(tenant_meta): Extension<middleware::TenantRequestMeta>,
     cancel: middleware::scheduler::PreemptionGuard,
-    ValidatedJson(body): ValidatedJson<CreateMessageRequest>,
+    ValidatedJson(mut body): ValidatedJson<CreateMessageRequest>,
 ) -> Response {
     if let Err(refused) = check_anthropic_version(&headers) {
         return refused;
     }
     if let Err(refused) = check_thinking_budget(&headers, &body) {
         return refused;
+    }
+    if strip_anthropic_preamble_enabled() {
+        if let Some(system) = &mut body.system {
+            system.strip_billing_preamble();
+        }
     }
     let model = body.model.clone();
     cancel
@@ -481,10 +486,15 @@ async fn v1_messages_count_tokens(
     headers: HeaderMap,
     Extension(tenant_meta): Extension<middleware::TenantRequestMeta>,
     cancel: middleware::scheduler::PreemptionGuard,
-    ValidatedJson(body): ValidatedJson<CountMessageTokensRequest>,
+    ValidatedJson(mut body): ValidatedJson<CountMessageTokensRequest>,
 ) -> Response {
     if let Err(refused) = check_anthropic_version(&headers) {
         return refused;
+    }
+    if strip_anthropic_preamble_enabled() {
+        if let Some(system) = &mut body.system {
+            system.strip_billing_preamble();
+        }
     }
     let model = body.model.clone();
     cancel

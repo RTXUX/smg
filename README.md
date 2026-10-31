@@ -56,6 +56,11 @@ pip install smg
 cargo install smg
 ```
 
+To install locally built SMG and gRPC servicer wheels into an existing engine
+image, run `./scripts/build_wheel_image.sh your-engine:base your-engine:smg`.
+See [the wheel image build guide](docker/README.wheels.md) for build arguments
+and wheel export.
+
 **Run** — point SMG at your inference workers:
 
 ```bash

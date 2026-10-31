@@ -1,0 +1,19 @@
+.git
+**/target
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.tox
+**/node_modules
+**/dist
+**/build
+**/*.egg-info
+**/*.whl
+**/*.log
+**/.DS_Store
+# Always generate stubs from the checked-out proto sources.
+crates/grpc_client/python/smg_grpc_proto/generated

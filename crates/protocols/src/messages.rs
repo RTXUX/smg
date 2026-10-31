@@ -366,6 +366,31 @@ pub enum SystemContent {
     Blocks(Vec<SystemContentBlock>),
 }
 
+impl SystemContent {
+    /// Remove Claude Code's leading billing-header line, which varies per
+    /// session and prevents prompt prefix reuse. Match Dynamo's behavior:
+    /// ignore leading whitespace when recognizing the header, require its
+    /// terminating newline, and preserve everything after that newline.
+    /// For block content, only the first block's text is changed; metadata
+    /// and subsequent blocks are preserved.
+    pub fn strip_billing_preamble(&mut self) {
+        let text = match self {
+            Self::String(text) => text,
+            Self::Blocks(blocks) => match blocks.first_mut() {
+                Some(SystemContentBlock::Text(block)) => &mut block.text,
+                None => return,
+            },
+        };
+        let trimmed = text.trim_start();
+        if trimmed.starts_with("x-anthropic-billing-header:") {
+            if let Some(newline) = trimmed.find('\n') {
+                let prefix_len = text.len() - trimmed.len() + newline + 1;
+                text.drain(..prefix_len);
+            }
+        }
+    }
+}
+
 /// System content block — wraps TextBlock with the required `type` discriminator
 /// so it round-trips correctly through serialization.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -2303,6 +2328,77 @@ mod tests {
     use serde_json::{self, json};
 
     use super::*;
+
+    #[test]
+    fn strip_billing_preamble_removes_only_a_complete_leading_line() {
+        for (input, expected) in [
+            (
+                "x-anthropic-billing-header: cc_version=1; cch=session;\nYou are helpful.",
+                "You are helpful.",
+            ),
+            (
+                "\u{2003}\n\t x-anthropic-billing-header: session\r\n  Keep this.\nAnd this.",
+                "  Keep this.\nAnd this.",
+            ),
+            ("x-anthropic-billing-header: session\n", ""),
+            (
+                "x-anthropic-billing-header: first\nx-anthropic-billing-header: second\nPrompt",
+                "x-anthropic-billing-header: second\nPrompt",
+            ),
+        ] {
+            let mut system = SystemContent::String(input.to_owned());
+            system.strip_billing_preamble();
+            assert_eq!(serde_json::to_value(system).unwrap(), json!(expected));
+        }
+
+        for input in [
+            "",
+            "  \n\t",
+            "  You are helpful.\n",
+            "x-anthropic-billing-header: no newline",
+            "  x-anthropic-billing-header: no newline",
+            "x-anthropic-billing-header missing colon\nPrompt",
+            "X-Anthropic-Billing-Header: session\nPrompt",
+            "Prompt\nx-anthropic-billing-header: session\n",
+        ] {
+            let mut system = SystemContent::String(input.to_owned());
+            system.strip_billing_preamble();
+            assert_eq!(serde_json::to_value(system).unwrap(), json!(input));
+        }
+    }
+
+    #[test]
+    fn strip_billing_preamble_preserves_blocks_and_metadata() {
+        let input = json!([
+            {
+                "type": "text",
+                "text": "x-anthropic-billing-header: session\nYou are helpful.",
+                "cache_control": {"type": "ephemeral"}
+            },
+            {"type": "text", "text": "x-anthropic-billing-header: later\nKeep this."}
+        ]);
+        let mut system: SystemContent = serde_json::from_value(input.clone()).unwrap();
+        system.strip_billing_preamble();
+        let mut expected = input;
+        expected[0]["text"] = json!("You are helpful.");
+        assert_eq!(serde_json::to_value(system).unwrap(), expected);
+
+        for input in [
+            json!([]),
+            json!([
+                {"type": "text", "text": ""},
+                {"type": "text", "text": "x-anthropic-billing-header: later\nPrompt"}
+            ]),
+            json!([
+                {"type": "text", "text": "x-anthropic-billing-header: no newline"},
+                {"type": "text", "text": "Prompt"}
+            ]),
+        ] {
+            let mut system: SystemContent = serde_json::from_value(input.clone()).unwrap();
+            system.strip_billing_preamble();
+            assert_eq!(serde_json::to_value(system).unwrap(), input);
+        }
+    }
 
     #[test]
     fn unsigned_thinking_replays_in_messages_and_token_counts() {

@@ -16,4 +16,12 @@ spec:
   endpoints:
     - port: metrics
       interval: {{ .Values.router.metrics.serviceMonitor.interval }}
+    {{- if .Values.router.metrics.serviceMonitor.engineMetrics.enabled }}
+    - port: http
+      path: /engine_metrics
+      interval: {{ default .Values.router.metrics.serviceMonitor.interval .Values.router.metrics.serviceMonitor.engineMetrics.interval }}
+      {{- with .Values.router.metrics.serviceMonitor.engineMetrics.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+    {{- end }}
 {{- end }}

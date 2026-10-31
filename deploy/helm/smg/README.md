@@ -68,6 +68,30 @@ See [`values.yaml`](values.yaml) for the full list of configurable parameters.
 
 `cache_aware` (default), `round_robin`, `power_of_two`, `consistent_hashing`, `prefix_hash`, `manual`, `random`, `bucket`
 
+### Metrics
+
+With the Prometheus Operator installed, set `router.metrics.serviceMonitor.enabled: true` to scrape the gateway's `/metrics` endpoint on the named `metrics` port (default 29000).
+
+To also collect native worker metrics through the gateway, enable the second ServiceMonitor endpoint:
+
+```yaml
+router:
+  metrics:
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      labels:
+        release: prometheus  # match your Prometheus ServiceMonitor selector
+      engineMetrics:
+        enabled: true
+        interval: ""         # inherit serviceMonitor.interval
+        scrapeTimeout: 10s   # optional; must not exceed the scrape interval
+```
+
+Engine metrics are opt-in and use `/engine_metrics` on the Service's named `http` port. No additional router flag or worker HTTP listener is required: HTTP workers are scraped through `/metrics`, while supported gRPC workers use `GetMetrics`. For vLLM gRPC workers, use a current SMG servicer with `smg-grpc-proto>=0.4.29` and omit `--disable-log-stats`. Both Python and Rust vLLM servicers support this endpoint. The engine interval defaults to `serviceMonitor.interval`; an empty `scrapeTimeout` uses Prometheus's configured timeout.
+
+The gateway preserves native metric names and labels and adds `worker_addr`. Each selected router replica collects its registered workers, so replicas sharing workers produce duplicate worker series. Deduplicate those series when aggregating, or configure Prometheus to collect engine metrics through a single gateway. Worker scrape failures are exposed as `smg_engine_metrics_scrape_success{worker_addr="..."} 0` when other workers succeed; the endpoint returns HTTP 500 if all workers fail or none are registered.
+
 ### Workers
 
 Each entry in `workers[]` creates a Deployment + Service:
@@ -145,7 +169,7 @@ workers:
 | [`with-postgres.yaml`](examples/with-postgres.yaml) | PostgreSQL history backend |
 | [`with-service-discovery.yaml`](examples/with-service-discovery.yaml) | K8s auto-discovery |
 | [`with-ingress.yaml`](examples/with-ingress.yaml) | Ingress with TLS |
-| [`with-monitoring.yaml`](examples/with-monitoring.yaml) | ServiceMonitor + Grafana dashboard |
+| [`with-monitoring.yaml`](examples/with-monitoring.yaml) | Gateway and engine ServiceMonitor endpoints + Grafana dashboard |
 
 ## Testing
 

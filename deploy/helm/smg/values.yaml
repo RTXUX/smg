@@ -116,6 +116,13 @@ router:
       enabled: false
       interval: 30s
       labels: {}
+      # -- Also scrape native worker metrics through the router's HTTP API.
+      #    Requires serviceMonitor.enabled. Replicas can report the same workers;
+      #    deduplicate worker series or scrape them through a single gateway.
+      engineMetrics:
+        enabled: false
+        interval: ""       # defaults to serviceMonitor.interval
+        scrapeTimeout: ""  # defaults to Prometheus's scrape timeout; must not exceed interval
 
   # -- Observability: OpenTelemetry tracing
   tracing:

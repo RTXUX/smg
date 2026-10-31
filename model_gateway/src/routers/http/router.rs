@@ -58,8 +58,8 @@ use crate::{
             attempt_ledger::{mark_upstream_answer, AttemptLedger},
             body_policy::{
                 decide_body_path, BodyPath, BodyPathInputs, BODY_PATH_BUFFERED, BODY_PATH_STREAMED,
-                REASON_MODEL_AMBIGUOUS, REASON_MODEL_SELECTION, REASON_NO_AVAILABLE_WORKER,
-                REASON_WORKER_MUTATES_BODY,
+                REASON_ANTHROPIC_PREAMBLE, REASON_MODEL_AMBIGUOUS, REASON_MODEL_SELECTION,
+                REASON_NO_AVAILABLE_WORKER, REASON_WORKER_MUTATES_BODY,
             },
             decisions::{SglangDecisionAdapter, UPSTREAM_ROUTE},
             header_utils, overload,
@@ -2147,6 +2147,12 @@ pub async fn stream_eligible_request_bodies(
     };
     if let BodyPolicy::MustBuffer(reason) = state.router.request_body_policy() {
         Metrics::record_request_body_path(BODY_PATH_BUFFERED, reason);
+        return next.run(req).await;
+    }
+    // Preamble normalization must run before worker selection and forwarding.
+    // The raw request-body path bypasses the typed Messages handler.
+    if route == "/v1/messages" && crate::config::strip_anthropic_preamble_enabled() {
+        Metrics::record_request_body_path(BODY_PATH_BUFFERED, REASON_ANTHROPIC_PREAMBLE);
         return next.run(req).await;
     }
     // ForwardCapable: resolve the concrete regular router behind an optional

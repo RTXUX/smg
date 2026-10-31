@@ -1,0 +1,99 @@
+# syntax=docker/dockerfile:1
+
+# The wheel builders never inherit from BASE_IMAGE, so changing the engine
+# image reuses the build cache. Run with the repository root as the context.
+ARG BASE_IMAGE=python:3.12-slim-bookworm
+ARG BUILDER_IMAGE=python:3.12-bookworm
+
+FROM ${BUILDER_IMAGE} AS grpc-wheels
+WORKDIR /src
+
+# Keep the proto symlink (python/smg_grpc_proto/proto -> ../../proto) valid.
+COPY crates/grpc_client/proto/ crates/grpc_client/proto/
+COPY crates/grpc_client/python/ crates/grpc_client/python/
+COPY grpc_servicer/ grpc_servicer/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip wheel --no-deps --wheel-dir /wheels \
+        ./crates/grpc_client/python ./grpc_servicer
+
+FROM ${BUILDER_IMAGE} AS smg-wheel
+ENV PATH="/root/.cargo/bin:${PATH}"
+WORKDIR /src
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates clang cmake curl git libclang-dev \
+        libprotobuf-dev libssl-dev patchelf pkg-config protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain none --profile minimal
+COPY rust-toolchain.toml ./
+RUN rustup toolchain install
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install 'maturin>=1.0,<2.0' ziglang
+
+COPY Cargo.toml Cargo.lock README.md LICENSE ./
+COPY .cargo/ .cargo/
+COPY bindings/ bindings/
+COPY clients/ clients/
+COPY crates/ crates/
+COPY model_gateway/ model_gateway/
+
+ARG BUILD_PROFILE=release
+ARG CARGO_BUILD_JOBS=16
+ARG TARGETARCH
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/root/.cargo/git,sharing=locked \
+    --mount=type=cache,id=smg-wheels-target-${TARGETARCH},target=/src/target,sharing=locked \
+    --mount=type=cache,id=smg-wheels-zig-${TARGETARCH},target=/root/.cache/zig,sharing=locked \
+    maturin build --manifest-path bindings/python/Cargo.toml \
+        --locked --profile "${BUILD_PROFILE}" --jobs "${CARGO_BUILD_JOBS}" \
+        --features vendored-openssl --manylinux 2_28 --zig \
+        --interpreter python3 --out /wheels
+
+# Optional artifact-only target: --target wheels --output type=local,dest=dist
+FROM scratch AS wheels
+COPY --from=grpc-wheels /wheels/ /
+COPY --from=smg-wheel /wheels/ /
+
+FROM ${BASE_IMAGE} AS runtime
+ARG RUNTIME_PYTHON=python3
+# Engine images may use a distro-managed Python. This only affects the build.
+ARG PIP_BREAK_SYSTEM_PACKAGES=1
+
+# Replace same-version source builds without force-reinstalling all of the
+# engine's dependencies. The second pass installs only missing/incompatible
+# dependencies. The mounts leave no wheel archives in the final image.
+RUN --mount=type=bind,from=wheels,source=/,target=/tmp/smg-wheels <<'SH'
+set -eu
+"${RUNTIME_PYTHON}" -m pip install --no-cache-dir --no-deps \
+    --force-reinstall /tmp/smg-wheels/*.whl
+"${RUNTIME_PYTHON}" - <<'PY'
+import glob
+import subprocess
+import sys
+from importlib.metadata import distributions
+
+# Match scripts/ci_install_e2e_deps.sh: these companions must emit protobuf-6
+# gencode. Include preinstalled companions in the solve, since packages like
+# grpcio-observability pin grpcio exactly and otherwise get left incompatible.
+companions = sorted({
+    dist.metadata["Name"] for dist in distributions()
+    if dist.metadata["Name"].lower().replace("_", "-").startswith("grpcio-")
+})
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install", "--no-cache-dir",
+    *sorted(glob.glob("/tmp/smg-wheels/*.whl")), *companions,
+    "grpcio-health-checking==1.81.*", "grpcio-reflection==1.81.*",
+])
+
+from smg import smg_rs
+import smg_grpc_servicer
+import smg_grpc_proto
+
+for name in smg_grpc_proto.__all__:
+    getattr(smg_grpc_proto, name)
+PY
+SH
+
+# Inherit the engine image's USER, WORKDIR, ENV, ENTRYPOINT, and CMD.

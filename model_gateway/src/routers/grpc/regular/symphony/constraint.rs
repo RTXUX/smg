@@ -273,7 +273,7 @@ impl<'a> Asks<'a> {
     }
 
     /// The JSON schema the request's answer must fit; a Messages request asks none (an
-    /// `output_format` is refused before this).
+    /// output formats are ignored; only tool use contributes constraints).
     pub(super) fn answer_schema(self) -> Option<Value> {
         match self {
             Self::Chat(request) => answer_schema(request.response_format.as_ref()),

@@ -64,9 +64,8 @@ impl MessagePreparationStage {
         ctx: &mut RequestContext,
         request: &CreateMessageRequest,
     ) -> Result<(), Response> {
-        if let Some(refusal) = output_format_refusal(request) {
-            return Err(refusal);
-        }
+        // Accept output_format and output_config.format for compatibility, but
+        // ignore them: Messages output formats do not constrain generation.
 
         // Step 0: Resolve tokenizer from registry (cached for reuse in response processing)
         let tokenizer = utils::resolve_tokenizer(ctx, "MessagePreparationStage::prepare_messages")
@@ -213,23 +212,10 @@ impl MessagePreparationStage {
     }
 }
 
-/// A structured output format would be dropped with the other pass-through
-/// fields and the answer returned unconstrained, so it is refused by name.
-fn output_format_refusal(request: &CreateMessageRequest) -> Option<Response> {
-    let field = request.output_format_field()?;
-    Some(error::bad_request(
-        "unsupported_output_format",
-        format!(
-            "{field} is not supported: the gateway cannot constrain a Messages answer to a format"
-        ),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
 
-    use super::{output_format_refusal, CreateMessageRequest};
     use crate::routers::grpc::utils::message_utils::invalid_multimodal_request;
 
     #[test]
@@ -239,16 +225,16 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    /// The stage renders `output_config.effort` as the `reasoning_effort`
-    /// template kwarg, renders none without it, and refuses another type.
+    /// Output formats are accepted without constraining generation or changing
+    /// the prompt, while `output_config.effort` still reaches the template.
     #[tokio::test]
-    async fn the_stage_renders_output_config_effort() {
+    async fn the_stage_renders_effort_and_ignores_output_formats() {
         use std::sync::Arc;
 
         use llm_tokenizer::{traits::Tokenizer, HuggingFaceTokenizer, TokenizerRegistry};
         use openai_protocol::messages::CreateMessageRequest;
         use reasoning_parser::ParserFactory as ReasoningParserFactory;
-        use serde_json::{json, Value};
+        use serde_json::json;
         use tool_parser::ParserFactory as ToolParserFactory;
 
         use crate::{
@@ -256,7 +242,8 @@ mod tests {
                 common::stages::PipelineStage,
                 context::{PreparationOutput, RequestContext, SharedComponents},
                 regular::{
-                    stages::messages::MessagePreparationStage, symphony::template::Templates,
+                    stages::messages::MessagePreparationStage,
+                    symphony::{template::Templates, Prepared},
                 },
                 utils::ParserResolver,
             },
@@ -307,74 +294,59 @@ mod tests {
             tokenizer_load_failures: Arc::default(),
             parser: crate::config::ParserChoice::Legacy,
         });
-        for (output_config, rendered) in [
-            (json!({"effort": "high"}), Ok("effort=high")),
-            (json!({"effort": 2}), Ok("effort=2")),
-            (json!({"effort": null}), Ok("effort=unset")),
-            (Value::Null, Ok("effort=unset")),
+        let format = json!({"type": "json_schema", "schema": {"type": "object"}});
+        for (extra, rendered) in [
+            (json!({"output_config": {"effort": "high"}}), "effort=high"),
+            (json!({"output_config": {"effort": 2}}), "effort=2"),
+            (json!({"output_config": {"effort": null}}), "effort=unset"),
+            (json!({"output_config": null}), "effort=unset"),
+            (json!({}), "effort=unset"),
+            (json!({"output_format": format}), "effort=unset"),
+            (json!({"output_config": {"format": format}}), "effort=unset"),
+            (
+                json!({
+                    "output_format": format,
+                    "output_config": {"format": format, "effort": "high"}
+                }),
+                "effort=high",
+            ),
+            (
+                json!({"output_format": null, "output_config": {"format": null}}),
+                "effort=unset",
+            ),
         ] {
-            let request: CreateMessageRequest = serde_json::from_value(json!({
-                "model": MODEL, "max_tokens": 8, "output_config": output_config,
+            let mut body = json!({
+                "model": MODEL, "max_tokens": 8,
                 "messages": [{"role": "user", "content": "hi"}]
-            }))
-            .unwrap();
+            });
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let request: CreateMessageRequest = serde_json::from_value(body).unwrap();
             let mut ctx = RequestContext::for_messages(
                 Arc::new(request),
                 None,
                 MODEL.into(),
                 components.clone(),
             );
-            let got = match MessagePreparationStage::new(&[]).execute(&mut ctx).await {
-                Err(response) => Err(response.status()),
-                Ok(()) => match &ctx.state.preparation {
-                    Some(PreparationOutput::Messages {
-                        processed_messages, ..
-                    }) => Ok(processed_messages.text.lines().last().unwrap().to_string()),
-                    _ => panic!("no messages preparation"),
-                },
+            MessagePreparationStage::new(&[])
+                .execute(&mut ctx)
+                .await
+                .unwrap_or_else(|response| panic!("{extra}: {}", response.status()));
+            let Some(PreparationOutput::Messages {
+                processed_messages,
+                tool_constraints,
+                ..
+            }) = &ctx.state.preparation
+            else {
+                panic!("no messages preparation");
             };
-            assert_eq!(got, rendered.map(str::to_string), "{output_config}");
-        }
-    }
-
-    /// An output format under either field is a 400 naming the field; a
-    /// request without one is not refused.
-    #[test]
-    fn an_output_format_is_refused_by_the_field_it_comes_under() {
-        let request = |extra: serde_json::Value| -> CreateMessageRequest {
-            let mut body = serde_json::json!({
-                "model": "m", "max_tokens": 8,
-                "messages": [{"role": "user", "content": "hi"}]
-            });
-            body.as_object_mut()
-                .expect("an object")
-                .extend(extra.as_object().expect("an object").clone());
-            serde_json::from_value(body).expect("a Messages request")
-        };
-        let format = serde_json::json!({"type": "json_schema", "schema": {"type": "object"}});
-        for (extra, field) in [
-            (
-                serde_json::json!({"output_format": format}),
-                "output_format",
-            ),
-            (
-                serde_json::json!({"output_config": {"format": format}}),
-                "output_config.format",
-            ),
-        ] {
-            let response = output_format_refusal(&request(extra)).expect("a refusal");
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{field}");
             assert_eq!(
-                response
-                    .headers()
-                    .get("x-smg-error-code")
-                    .and_then(|v| v.to_str().ok()),
-                Some("unsupported_output_format"),
-                "{field}"
+                processed_messages.text,
+                format!("user: hi\n{rendered}"),
+                "{extra}"
             );
+            assert!(matches!(tool_constraints, Ok(Prepared::None)), "{extra}");
         }
-        assert!(
-            output_format_refusal(&request(serde_json::json!({"output_format": null}))).is_none()
-        );
     }
 }

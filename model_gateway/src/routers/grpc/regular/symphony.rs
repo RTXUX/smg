@@ -452,8 +452,8 @@ pub(crate) fn constraint_messages(
 
 /// [`auto_constraint`] for a Messages request: the calls it may make under `auto` (or no choice),
 /// one at most when parallel use is disabled; nothing when the prompt `continues` the assistant's
-/// message. A Messages request carries no constraint of its own (an `output_format` is refused
-/// before this).
+/// message. Messages output formats (`output_format` and `output_config.format`) are ignored;
+/// only tool use contributes constraints.
 pub(crate) fn auto_constraint_messages(
     parser: ParserChoice,
     names: &Names,

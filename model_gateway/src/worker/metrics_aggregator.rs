@@ -24,24 +24,67 @@ pub fn aggregate_metrics(metric_packs: Vec<MetricPack>) -> anyhow::Result<String
     for metric_pack in metric_packs {
         let metrics_text = metric_pack.metrics_text.replace(':', &colon_escape);
 
-        let exposition = match openmetrics_parser::prometheus::parse_prometheus(&metrics_text) {
-            Ok(x) => x,
-            Err(err) => {
-                warn!(
-                    "aggregate_metrics error when parsing text: pack={:?} err={:?}",
-                    metric_pack, err
-                );
-                continue;
+        match openmetrics_parser::prometheus::parse_prometheus(&metrics_text) {
+            Ok(exposition) => {
+                expositions.push(transform_metrics(exposition, &metric_pack.labels));
             }
-        };
-        let exposition = transform_metrics(exposition, &metric_pack.labels);
-        expositions.push(exposition);
+            Err(_) => {
+                // One rejected family (e.g. a negative latency histogram sum)
+                // must not hide every metric from this worker. Retry complete
+                // families, retaining histogram buckets/count/sum together.
+                for family_text in metric_family_blocks(&metrics_text) {
+                    match openmetrics_parser::prometheus::parse_prometheus(family_text) {
+                        Ok(exposition) => {
+                            expositions.push(transform_metrics(exposition, &metric_pack.labels));
+                        }
+                        Err(error) => warn!(
+                            labels = ?metric_pack.labels,
+                            family = %family_text.lines().next().unwrap_or_default().replace(&colon_escape, ":"),
+                            ?error,
+                            "Skipping engine metric family that failed to parse"
+                        ),
+                    }
+                }
+            }
+        }
     }
 
     let text = try_reduce(expositions, merge_exposition)?
         .map(|x| format!("{x}").replace(&colon_escape, ":"))
         .unwrap_or_default();
     Ok(text)
+}
+
+/// Prometheus exporters group each family's HELP/TYPE and samples. Either
+/// descriptor may appear first or be omitted; matching descriptors stay in
+/// the same block. Only used to recover a snapshot that failed full parsing.
+fn metric_family_blocks(text: &str) -> Vec<&str> {
+    let mut blocks = Vec::new();
+    let mut start = 0;
+    let mut offset = 0;
+    let mut family = None;
+    let mut has_samples = false;
+    for line in text.split_inclusive('\n') {
+        let descriptor = line
+            .strip_prefix("# HELP ")
+            .or_else(|| line.strip_prefix("# TYPE "))
+            .and_then(|rest| rest.split_whitespace().next());
+        if let Some(name) = descriptor {
+            if family != Some(name) && (family.is_some() || has_samples) {
+                blocks.push(&text[start..offset]);
+                start = offset;
+                has_samples = false;
+            }
+            family = Some(name);
+        } else if !line.trim().is_empty() && !line.starts_with('#') {
+            has_samples = true;
+        }
+        offset += line.len();
+    }
+    if !text[start..].trim().is_empty() {
+        blocks.push(&text[start..]);
+    }
+    blocks
 }
 
 /// The escape that stands in for `:` while parsing: `xsmgcolon{n}z` for the

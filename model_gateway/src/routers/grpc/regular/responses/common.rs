@@ -551,7 +551,6 @@ pub(super) async fn resolve_item_references(
 fn input_item_id(item: &ResponseInputOutputItem) -> Option<&str> {
     match item {
         ResponseInputOutputItem::Message { id, .. }
-        | ResponseInputOutputItem::Reasoning { id, .. }
         | ResponseInputOutputItem::McpApprovalRequest { id, .. }
         | ResponseInputOutputItem::ImageGenerationCall { id, .. }
         | ResponseInputOutputItem::ComputerCall { id, .. }
@@ -559,7 +558,8 @@ fn input_item_id(item: &ResponseInputOutputItem) -> Option<&str> {
         | ResponseInputOutputItem::LocalShellCallOutput { id, .. }
         | ResponseInputOutputItem::McpCall { id, .. }
         | ResponseInputOutputItem::McpListTools { id, .. } => Some(id.as_str()),
-        ResponseInputOutputItem::FunctionToolCall { id, .. }
+        ResponseInputOutputItem::Reasoning { id, .. }
+        | ResponseInputOutputItem::FunctionToolCall { id, .. }
         | ResponseInputOutputItem::FunctionCallOutput { id, .. }
         | ResponseInputOutputItem::McpApprovalResponse { id, .. }
         | ResponseInputOutputItem::Compaction { id, .. }

@@ -1690,7 +1690,10 @@ pub enum ResponseInputOutputItem {
     #[serde(rename = "reasoning")]
     #[non_exhaustive]
     Reasoning {
-        id: String,
+        /// Optional when replaying reasoning as input. Preserve supplied IDs
+        /// so the item can still be resolved by an `item_reference`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
         #[serde(default)]
         summary: Vec<SummaryTextContent>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -4279,7 +4282,7 @@ impl ResponseInputOutputItem {
         status: Option<String>,
     ) -> Self {
         Self::Reasoning {
-            id,
+            id: Some(id),
             summary,
             content,
             encrypted_content: None,
@@ -4298,7 +4301,7 @@ impl ResponseInputOutputItem {
         status: Option<String>,
     ) -> Self {
         Self::Reasoning {
-            id,
+            id: Some(id),
             summary,
             content,
             encrypted_content: Some(encrypted_content),

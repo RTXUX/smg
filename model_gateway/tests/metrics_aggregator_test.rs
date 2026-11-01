@@ -173,6 +173,42 @@ valid_metric{source="worker2"} 123
 }
 
 #[test]
+fn test_rejected_histogram_does_not_discard_other_families() {
+    // A worker can already have a negative cumulative queue-time sum after
+    // observing an error before scheduling. The parser rejects that family,
+    // but the rest of the same worker's snapshot must remain available.
+    for with_help in [false, true] {
+        let help = if with_help {
+            "# HELP vllm:request_queue_time_seconds Queue time.\n"
+        } else {
+            ""
+        };
+        let result = aggregate_metrics(vec![MetricPack {
+            labels: vec![("worker_addr".into(), "grpc://worker:8000".into())],
+            metrics_text: format!(
+                "untyped_metric 3\n\
+                 # TYPE vllm:generation_tokens_total counter\n\
+                 vllm:generation_tokens_total{{engine=\"0\"}} 17\n\
+                 {help}# TYPE vllm:request_queue_time_seconds histogram\n\
+                 vllm:request_queue_time_seconds_bucket{{le=\"+Inf\"}} 1\n\
+                 vllm:request_queue_time_seconds_count 1\n\
+                 vllm:request_queue_time_seconds_sum -7890000\n\
+                 # TYPE vllm:num_requests_running gauge\n\
+                 # HELP vllm:num_requests_running Running requests.\n\
+                 vllm:num_requests_running 2\n"
+            ),
+        }])
+        .unwrap();
+        assert!(result.contains("untyped_metric{worker_addr=\"grpc://worker:8000\"} 3"));
+        assert!(result.contains(
+            "vllm:generation_tokens_total{engine=\"0\",worker_addr=\"grpc://worker:8000\"} 17"
+        ));
+        assert!(result.contains("vllm:num_requests_running{worker_addr=\"grpc://worker:8000\"} 2"));
+        assert!(!result.contains("vllm:request_queue_time_seconds"));
+    }
+}
+
+#[test]
 fn test_real() {
     let pack1 = MetricPack {
         labels: vec![("source".to_string(), "worker1".to_string())],

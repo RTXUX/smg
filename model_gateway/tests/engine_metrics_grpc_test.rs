@@ -31,7 +31,17 @@ impl proto::vllm_engine_server::VllmEngine for Engine {
         if self.unsupported {
             return Err(Status::unimplemented("older worker"));
         }
-        Ok(Response::new(common::GetMetricsResponse { prometheus_text: "# HELP vllm:tokens_total Tokens\n# TYPE vllm:tokens_total counter\nvllm:tokens_total{engine=\"0\"} 17\n".into() }))
+        Ok(Response::new(common::GetMetricsResponse {
+            prometheus_text: "# HELP vllm:tokens_total Tokens\n\
+                # TYPE vllm:tokens_total counter\n\
+                vllm:tokens_total{engine=\"0\"} 17\n\
+                # HELP vllm:request_queue_time_seconds Queue time\n\
+                # TYPE vllm:request_queue_time_seconds histogram\n\
+                vllm:request_queue_time_seconds_bucket{le=\"+Inf\"} 1\n\
+                vllm:request_queue_time_seconds_count 1\n\
+                vllm:request_queue_time_seconds_sum -7890000\n"
+                .into(),
+        }))
     }
     async fn generate(
         &self,
@@ -94,6 +104,7 @@ impl proto::vllm_engine_server::VllmEngine for Engine {
         Err(Status::unimplemented("unused"))
     }
 }
+#[expect(clippy::unwrap_used, reason = "test worker setup must succeed")]
 async fn worker(unsupported: bool) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
     let hits = Arc::new(AtomicUsize::new(0));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -194,6 +205,13 @@ async fn mixed_scrape_deduplicates_dp_and_isolates_old_workers() {
             sample.contains(&format!("worker_addr=\"{url}\"")) && sample.ends_with(" 17"),
             "{sample}"
         );
+        // The worker's rejected histogram must not hide its token counter.
+        assert!(!body.contains("vllm:request_queue_time_seconds"));
+        assert!(body.lines().any(|s| {
+            s.starts_with("smg_engine_metrics_scrape_success{")
+                && s.contains(&url)
+                && s.ends_with(" 1")
+        }));
         assert!(body
             .lines()
             .any(|s| s.starts_with("http_tokens{") && s.ends_with(" 9")));

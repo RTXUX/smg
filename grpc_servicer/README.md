@@ -59,6 +59,9 @@ worker with no `GetMetrics` is omitted, with
 `smg_engine_metrics_scrape_success{worker_addr="..."} 0` alongside successful
 workers. If all worker requests fail, the gateway returns HTTP 500 as before.
 Metrics collection does not change worker health or routing eligibility.
+Scrape success reports transport success. If a metric family fails parsing,
+the gateway logs and omits that family while retaining the other families
+from the worker.
 This endpoint is separate from the gateway's `/metrics` listener and its
 lightweight `smg_engine_*` load gauges. When scraping several gateway replicas,
 deduplicate worker series or designate one collector to avoid counting each

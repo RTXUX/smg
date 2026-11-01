@@ -143,12 +143,36 @@ pub struct TokenTag {
 
 impl TokenTag {
     fn to_json(&self) -> Value {
+        let mut content = self.content.to_json();
+        // Mixed boundaries are stored in content. Keep a final token as the
+        // actual tag end when possible: xgrammar rejects an empty string end
+        // around unbounded content such as a repetition of Qwen parameters,
+        // even when a closing token was appended inside that content.
+        let end = if self.end.is_empty() {
+            take_end_token(&mut content).unwrap_or_else(|| json!(self.end))
+        } else {
+            json!(self.end)
+        };
         json!({
             "type": "tag",
             "begin": {"type": "token", "token": self.begin},
-            "content": self.content.to_json(),
-            "end": self.end,
+            "content": content,
+            "end": end,
         })
+    }
+}
+
+/// Extract only a mandatory final token, through nested sequences. Schemas,
+/// alternatives, and repetitions are opaque: their last token is not always
+/// the end of the enclosing tag.
+fn take_end_token(format: &mut Value) -> Option<Value> {
+    match format["type"].as_str()? {
+        "sequence" => take_end_token(format["elements"].as_array_mut()?.last_mut()?),
+        "token" => Some(std::mem::replace(
+            format,
+            json!({"type": "const_string", "value": ""}),
+        )),
+        _ => None,
     }
 }
 

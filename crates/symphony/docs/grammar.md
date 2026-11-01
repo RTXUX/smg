@@ -114,3 +114,10 @@ so the model cannot spell it in ordinary tokens there. Mixed string/token bounda
 triggered tags whose begins are added tokens use `token_triggered_tags`, and separated empty-separator
 calls use repetition over mixed tags. Tokenized parsing applies the same identity rule: the spelling
 alone is content unless the required ID produced it.
+
+When a token-triggered tag's content ends with a mandatory marker token, its exported `end`
+is that token, with any preceding closing text kept in the content. Leaving `end` empty would
+make xgrammar reject unbounded content such as Qwen's repeated parameters for a tool without
+declared properties. The structural-tag export test includes Qwen payloads with bound marker IDs;
+`tools/compile_structural_tags.py --tokenizer ...` checks them through the same compiler entrypoint
+as vLLM.

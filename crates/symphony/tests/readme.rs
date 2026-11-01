@@ -4,11 +4,19 @@
 //! test -p smg-symphony --test readme` writes the table into `README.md`; without the switch the
 //! test fails on a stale table and prints the one to write.
 
-use std::{fmt::Write as _, fs, path::PathBuf};
+use std::{
+    fmt::Write as _,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use openai_protocol::common::{Function, Tool};
 use serde_json::json;
-use symphony::formats::{groups, table_for, Table};
+use symphony::{
+    formats::{groups, table_for, Table},
+    grammar::Options,
+    MarkerToken,
+};
 
 /// The switch that writes the table into the README instead of checking it.
 const WRITE_ENV: &str = "SYMPHONY_WRITE_README";
@@ -2615,6 +2623,64 @@ fn every_tables_structural_tag_is_written_when_asked() {
         }
     }
     assert!(written > 0, "no table wrote a tag");
+    qwen_token_bound_structural_tags(Some(&directory));
+}
+
+#[test]
+fn qwen_token_bound_structural_tags_have_a_real_end() {
+    qwen_token_bound_structural_tags(None);
+}
+
+#[expect(clippy::expect_used, reason = "test grammar and export must succeed")]
+fn qwen_token_bound_structural_tags(directory: Option<&Path>) {
+    // The string-only exports miss this failure: real Qwen tokenizers bind
+    // the call markers to IDs, and ping's unbounded parameter repetition
+    // then requires an actual tag end in xgrammar 0.2.8.
+    let format = Table::Qwen3Tagged.format().marker_tokens([
+        MarkerToken::new("<tool_call>", 248058),
+        MarkerToken::new("</tool_call>", 248059),
+        MarkerToken::new("<think>", 248068),
+        MarkerToken::new("</think>", 248069),
+    ]);
+    for at_least_one in [false, true] {
+        for reasoning_open in [false, true] {
+            for one_call in [false, true] {
+                let payload = format
+                    .grammar_for(
+                        &tag_tools(),
+                        Options {
+                            at_least_one,
+                            reasoning_open,
+                            one_call,
+                            ..Options::default()
+                        },
+                    )
+                    .expect("a grammar")
+                    .payload();
+                let calls = if reasoning_open {
+                    payload["format"]["elements"]
+                        .as_array()
+                        .and_then(|elements| elements.last())
+                        .expect("the calls after the thought")
+                } else {
+                    &payload["format"]
+                };
+                assert_eq!(calls["type"], "token_triggered_tags");
+                for tag in calls["tags"].as_array().expect("tool tags") {
+                    assert_eq!(tag["end"], json!({"type": "token", "token": 248059}));
+                }
+                if let Some(directory) = directory {
+                    let name = format!(
+                        "Qwen3Tagged-tokens-{}-{}-{}.json",
+                        if one_call { "single" } else { "parallel" },
+                        if at_least_one { "required" } else { "optional" },
+                        if reasoning_open { "open" } else { "closed" },
+                    );
+                    fs::write(directory.join(name), payload.to_string()).expect("the payload");
+                }
+            }
+        }
+    }
 }
 
 #[test]

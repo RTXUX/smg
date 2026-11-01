@@ -56,9 +56,11 @@ def main() -> int:
         started = time.perf_counter()
         try:
             text = path.read_text(encoding="utf-8")
-            grammar = xgr.Grammar.from_structural_tag(json.loads(text))
             if compiler is not None:
-                compiler.compile_grammar(grammar)
+                # Exercise the same entrypoint as vLLM's xgrammar backend.
+                compiler.compile_structural_tag(text)
+            else:
+                xgr.Grammar.from_structural_tag(json.loads(text))
             verdict = "ok"
         except Exception as error:  # noqa: BLE001 - every failure is reported, whatever its kind
             failures += 1

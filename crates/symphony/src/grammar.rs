@@ -200,9 +200,29 @@ impl Serialize for TokenTag {
         let mut map = serializer.serialize_map(Some(4))?;
         map.serialize_entry("type", "tag")?;
         map.serialize_entry("begin", &Grammar::Token(self.begin))?;
-        map.serialize_entry("content", &self.content)?;
-        map.serialize_entry("end", &self.end)?;
+        let mut content = self.content.to_json();
+        let end = if self.end.is_empty() {
+            take_end_token(&mut content).unwrap_or_else(|| json!(self.end))
+        } else {
+            json!(self.end)
+        };
+        map.serialize_entry("content", &content)?;
+        map.serialize_entry("end", &end)?;
         map.end()
+    }
+}
+
+/// Extract only a mandatory final token, through nested sequences. Schemas,
+/// alternatives, and repetitions are opaque: their last token is not always
+/// the end of the enclosing tag.
+fn take_end_token(format: &mut Value) -> Option<Value> {
+    match format["type"].as_str()? {
+        "sequence" => take_end_token(format["elements"].as_array_mut()?.last_mut()?),
+        "token" => Some(std::mem::replace(
+            format,
+            json!({"type": "const_string", "value": ""}),
+        )),
+        _ => None,
     }
 }
 
@@ -297,7 +317,10 @@ impl Grammar {
                 end.check()
             }
             Self::TokenTriggeredTags { tags, .. } => tags.iter().try_for_each(|tag| {
-                if tag.content.unbounded() && tag.end.is_empty() {
+                if tag.content.unbounded()
+                    && tag.end.is_empty()
+                    && take_end_token(&mut tag.content.to_json()).is_none()
+                {
                     return Err(tag.begin.to_string());
                 }
                 tag.content.check()

@@ -29,8 +29,9 @@ What the engine decides for every format, and what it leaves open:
 - With the tagged syntax, a value's type comes from the request's tools (`Declared`): a
   declared string streams, every other value is written at its close. A call to a function the
   request did not declare has every value inferred.
-- Call ids are `call_<index>` for now; the id scheme is the maintainer's decision
-  (deterministic or carrying the conversation's history) and changes only this one line.
+- Call ids are output-local `call_<index>` values. The gateway's shared response reader
+  replaces them with UUID-based ids before sending events to the API adapters, so calls from
+  different requests or choices never reuse the parser's local ids.
 - Every text event says how many tokens it carries, counted by the `Ledger` from the deltas'
   spans: a token in the event that carries its first byte, a byte-less span (a held half of a
   character, or a hidden special token) into the run that carries the next byte, and the tokens

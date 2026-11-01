@@ -1,6 +1,8 @@
 //! Symphony reading the chat stream: the assignment on the response spec switches the drivers
 //! from the tool and reasoning parsers to one engine per choice, with the same chunks on the wire.
 
+use std::collections::HashSet;
+
 use llm_tokenizer::StopSequenceConfig;
 use openai_protocol::{
     chat::ChatChoice,
@@ -39,6 +41,133 @@ fn assigned(mut spec: ChatResponseSpec, format: Format, prompt: &str) -> ChatRes
 /// A Qwen3 output: a thought, content, and one call of the declared `lookup` tool.
 const QWEN3_OUTPUT: &str = "<think>plan</think>Hello <tool_call>\n\
                             {\"name\": \"lookup\", \"arguments\": {\"q\": 1}}\n</tool_call>";
+
+const TWO_CALLS: &str = concat!(
+    "<tool_call>\n{\"name\": \"lookup\", \"arguments\": {\"q\": 1}}\n</tool_call>",
+    "<tool_call>\n{\"name\": \"lookup\", \"arguments\": {\"q\": 2}}\n</tool_call>"
+);
+
+#[tokio::test]
+async fn symphony_chat_tool_ids_are_unique_across_turns_and_choices() {
+    let mut seen = HashSet::new();
+    for _turn in 0..2 {
+        let mut spec = assigned(chat_spec(true), qwen3(CallSyntax::Json), "");
+        spec.expected_choices = 2;
+        let (result, events) = stream_events(
+            vec![
+                chunk(0, &TWO_CALLS[..35]),
+                chunk(1, &TWO_CALLS[..35]),
+                chunk(0, &TWO_CALLS[35..]),
+                chunk(1, &TWO_CALLS[35..]),
+                complete(0, "stop"),
+                complete(1, "stop"),
+            ],
+            true,
+            spec,
+        )
+        .await;
+        assert!(result.is_ok(), "{result:?}");
+        let mut counts = [0; 2];
+        for event in &events {
+            for choice in event["choices"].as_array().into_iter().flatten() {
+                for call in choice["delta"]["tool_calls"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(id) = call["id"].as_str() {
+                        assert!(id.starts_with("call_"), "{id}");
+                        assert!(seen.insert(id.to_string()), "reused tool call id: {id}");
+                        counts[choice["index"].as_u64().expect("choice index") as usize] += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(counts, [2, 2]);
+
+        let (choice, _) = fold(TWO_CALLS).await;
+        let calls = choice.message.tool_calls.expect("tool calls");
+        assert_eq!(calls.len(), 2);
+        for call in calls {
+            assert!(
+                seen.insert(call.id.clone()),
+                "reused tool call id: {}",
+                call.id
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn symphony_message_tool_ids_are_unique_across_turns() {
+    let mut seen = HashSet::new();
+    for _turn in 0..2 {
+        let spec = assigned_message(qwen3(CallSyntax::Json), "", false);
+        let (result, events) = message_events(
+            vec![
+                chunk(0, &TWO_CALLS[..35]),
+                chunk(0, &TWO_CALLS[35..]),
+                complete(0, "stop"),
+            ],
+            spec,
+            None,
+        )
+        .await;
+        assert!(result.is_ok(), "{result:?}");
+        let calls: Vec<_> = events
+            .iter()
+            .filter(|event| event["type"] == "content_block_start")
+            .map(|event| &event["content_block"])
+            .filter(|block| block["type"] == "tool_use")
+            .collect();
+        assert_eq!(calls.len(), 2);
+        for call in calls {
+            let id = call["id"].as_str().expect("tool use id");
+            assert!(id.starts_with("toolu_"), "{id}");
+            assert!(seen.insert(id.to_string()), "reused tool use id: {id}");
+        }
+        let blocks = message_blocks(&events);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].2, json!({"q": 1}));
+        assert_eq!(blocks[1].2, json!({"q": 2}));
+
+        let mut terminal = complete(0, "stop");
+        if let Some(proto::generate_response::Response::Complete(complete)) = &mut terminal.response
+        {
+            complete.output_ids = TWO_CALLS.chars().map(u32::from).collect();
+        }
+        let (stream, server) = scripted_stream(vec![terminal], "0").await;
+        let tokenizer: Arc<dyn Tokenizer> = Arc::new(CharacterTokenizer::default());
+        let mut decoder =
+            StopSequenceDecoder::new(tokenizer.clone(), StopSequenceConfig::default(), false);
+        let processor = ResponseProcessor::new(
+            ToolParserFactory::new(),
+            ReasoningParserFactory::new(),
+            utils::ParserResolver::disabled(),
+        );
+        let message = processor
+            .process_non_streaming_messages_response(
+                context::ExecutionResult::Single { stream },
+                assigned_message(qwen3(CallSyntax::Json), "", false),
+                dispatch(),
+                tokenizer,
+                &mut decoder,
+            )
+            .await
+            .expect("a message");
+        server.abort();
+        let message = serde_json::to_value(message).expect("message JSON");
+        let calls = message["content"].as_array().expect("content blocks");
+        assert_eq!(calls.len(), 2);
+        for (index, call) in calls.iter().enumerate() {
+            assert_eq!(call["type"], "tool_use");
+            assert_eq!(call["input"], json!({"q": index + 1}));
+            let id = call["id"].as_str().expect("tool use id");
+            assert!(id.starts_with("toolu_"), "{id}");
+            assert!(seen.insert(id.to_string()), "reused tool use id: {id}");
+        }
+    }
+}
 
 async fn stream_events(
     responses: Vec<proto::GenerateResponse>,

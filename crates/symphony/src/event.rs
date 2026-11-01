@@ -96,11 +96,12 @@ pub enum Event {
     Reasoning(Text),
     /// The reasoning region closed.
     ReasoningEnd,
-    /// A tool call began; the id is assigned by the parser so the caller never mints one.
+    /// A tool call began, with an output-local id assigned by the parser.
     ToolCallStart {
         /// Position of this call among the output's calls, starting at zero.
         index: u32,
-        /// The call id, in the format the model family uses.
+        /// The output-local call id. Servers must assign globally unique ids before
+        /// exposing calls across requests.
         id: String,
         /// The function name.
         name: String,

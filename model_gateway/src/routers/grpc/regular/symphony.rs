@@ -50,6 +50,7 @@ use symphony::{
 };
 use tool_parser::ToolConstraint;
 use tracing::debug;
+use uuid::Uuid;
 
 use self::template::Templates;
 use crate::{
@@ -704,6 +705,15 @@ impl Reader {
                 if let Event::Finish { tool_calls, .. } = event {
                     *tool_calls = (*tool_calls).min(1);
                 }
+            }
+        }
+        // Symphony's ids are local to one output (`call_0`, `call_1`, ...).
+        // Assign a wire id once, when the call starts, before any adapter sees it.
+        // Argument and end events correlate by index, so streaming and whole
+        // responses keep the same id without reusing it across turns or choices.
+        for event in &mut events {
+            if let Event::ToolCallStart { id, .. } = event {
+                *id = format!("call_{}", Uuid::now_v7().simple());
             }
         }
         events

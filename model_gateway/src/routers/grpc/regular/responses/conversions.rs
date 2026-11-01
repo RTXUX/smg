@@ -797,6 +797,46 @@ mod tests {
     };
 
     #[test]
+    fn stateless_reasoning_without_id_survives_tool_continuation() {
+        for content in [
+            serde_json::json!([{"type": "reasoning_text", "text": "Use the tool."}]),
+            serde_json::json!([]),
+        ] {
+            let req: ResponsesRequest = serde_json::from_value(serde_json::json!({
+                "model": "qwen3.8-flash-next", "store": false,
+                "input": [
+                    {"role": "user", "content": "Inspect the workspace."},
+                    {"type": "reasoning", "summary": [], "content": content,
+                     "encrypted_content": encode_reasoning_content("Use the tool.")},
+                    {"type": "function_call", "call_id": "call_shell", "name": "bash", "arguments": "{}"},
+                    {"type": "function_call_output", "call_id": "call_shell", "output": "/workspace"}
+                ]
+            }))
+            .unwrap();
+            let chat = responses_to_chat(&req).unwrap();
+            assert_eq!(chat.messages.len(), 3);
+            match &chat.messages[1] {
+                ChatMessage::Assistant {
+                    reasoning_content,
+                    tool_calls: Some(calls),
+                    ..
+                } => {
+                    assert_eq!(reasoning_content.as_deref(), Some("Use the tool."));
+                    assert_eq!(calls.len(), 1);
+                    assert_eq!(calls[0].id, "call_shell");
+                    assert_eq!(calls[0].function.name, "bash");
+                }
+                other => {
+                    panic!("expected reasoning and tool call in one assistant turn: {other:?}")
+                }
+            }
+            assert!(matches!(&chat.messages[2], ChatMessage::Tool {
+                content: MessageContent::Text(output), tool_call_id,
+            } if output == "/workspace" && tool_call_id == "call_shell"));
+        }
+    }
+
+    #[test]
     fn chat_to_responses_serializes_responses_api_usage() {
         let chat_response = ChatCompletionResponse::builder("chatcmpl_test", "test-model")
             .choices(vec![ChatChoice {

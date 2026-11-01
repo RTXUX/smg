@@ -86,6 +86,9 @@ TTFT/end-to-end use frontend wall time; engine phase times and inter-token
 latency use EngineCore monotonic timestamps. String stops count as `stop`;
 client cancellation counts as `abort`. `--disable-log-stats` disables the Rust
 registry and returns an empty successful snapshot.
+Requests that fail or are cancelled before scheduling or producing tokens
+only contribute phase timings whose start and end were observed; missing
+timestamps do not create negative or inflated latency samples.
 
 This is not complete Python registry parity. Rust does not export Python
 process/GC collectors, model/cache configuration info, frontend admission and

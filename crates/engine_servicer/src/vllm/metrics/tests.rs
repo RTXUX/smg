@@ -243,6 +243,117 @@ fn aborted_and_refused_requests_release_tracking_and_ignore_late_outputs() {
 }
 
 #[test]
+fn failed_requests_without_tokens_do_not_observe_unfinished_phases() {
+    for reason in [EngineCoreFinishReason::Error, EngineCoreFinishReason::Abort] {
+        for scheduled in [false, true] {
+            let metrics = collector();
+            metrics.submitted(0, &request("a"));
+            let mut batch = first();
+            let output = &mut batch.outputs[0];
+            output.new_token_ids.clear();
+            output.prefill_stats = None;
+            output.finish_reason = Some(reason);
+            if !scheduled {
+                output.events.as_mut().unwrap().truncate(1);
+            }
+            metrics.batch_at(&batch, 101.0);
+
+            let queue = metrics.histograms["request_queue_time_seconds"]
+                .with_label_values(&["fixture", "0"]);
+            assert_eq!(queue.get_sample_count(), u64::from(scheduled));
+            assert_eq!(queue.get_sample_sum(), if scheduled { 0.5 } else { 0.0 });
+            for name in [
+                "time_to_first_token_seconds",
+                "inter_token_latency_seconds",
+                "request_prefill_time_seconds",
+                "request_decode_time_seconds",
+                "request_inference_time_seconds",
+                "request_time_per_output_token_seconds",
+            ] {
+                let histogram = metrics.histograms[name].with_label_values(&["fixture", "0"]);
+                assert_eq!(histogram.get_sample_count(), 0, "{name}");
+                assert_eq!(histogram.get_sample_sum(), 0.0, "{name}");
+            }
+            assert_eq!(
+                metrics.histograms["e2e_request_latency_seconds"]
+                    .with_label_values(&["fixture", "0"])
+                    .get_sample_count(),
+                1
+            );
+            assert!(metrics.requests.lock().unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn event_only_outputs_and_requeue_preserve_first_phase_timestamps() {
+    let metrics = collector();
+    metrics.submitted(0, &request("a"));
+    let mut queued = first();
+    queued.outputs[0].new_token_ids.clear();
+    queued.outputs[0].prefill_stats = None;
+    queued.outputs[0].events.as_mut().unwrap().truncate(1);
+    metrics.batch_at(&queued, 100.5);
+    metrics.batch_at(&first(), 101.0);
+    let mut completed = second();
+    completed.outputs[0].events.as_mut().unwrap().insert(
+        1,
+        EngineCoreEvent {
+            r#type: EngineCoreEventType::Queued,
+            timestamp: 11.3,
+        },
+    );
+    metrics.batch_at(&completed, 102.0);
+    for (name, count, sum) in [
+        ("time_to_first_token_seconds", 1, 1.0),
+        ("inter_token_latency_seconds", 1, 1.0),
+        ("request_queue_time_seconds", 1, 0.5),
+        ("request_prefill_time_seconds", 1, 0.5),
+        ("request_decode_time_seconds", 1, 1.0),
+    ] {
+        let histogram = metrics.histograms[name].with_label_values(&["fixture", "0"]);
+        assert_eq!(histogram.get_sample_count(), count, "{name}");
+        assert_eq!(histogram.get_sample_sum(), sum, "{name}");
+    }
+}
+
+#[test]
+fn tokenless_prefill_preserves_prompt_accounting_without_token_latency() {
+    let metrics = collector();
+    metrics.submitted(0, &request("a"));
+    let mut batch = first();
+    batch.outputs[0].new_token_ids.clear();
+    metrics.batch_at(&batch, 100.5);
+    assert_eq!(
+        metrics.counters["prompt_tokens"]
+            .with_label_values(&["fixture", "0"])
+            .get(),
+        100.0
+    );
+    assert_eq!(
+        metrics.histograms["time_to_first_token_seconds"]
+            .with_label_values(&["fixture", "0"])
+            .get_sample_count(),
+        0
+    );
+    // Repeated prefill metadata on a later output must not count twice.
+    metrics.batch_at(&first(), 101.0);
+    metrics.batch_at(&second(), 102.0);
+    assert_eq!(
+        metrics.counters["prompt_tokens"]
+            .with_label_values(&["fixture", "0"])
+            .get(),
+        100.0
+    );
+    assert_eq!(
+        metrics.counters["prompt_tokens_cached"]
+            .with_label_values(&["fixture", "0"])
+            .get(),
+        40.0
+    );
+}
+
+#[test]
 fn registries_are_isolated_and_custom_buckets_are_used() {
     let mut config = MetricsConfig::default();
     config

@@ -56,12 +56,13 @@ struct RequestStats {
     arrival: f64,
     prompt: u64,
     cached: u64,
+    prefill_recorded: bool,
     remote_cached: Option<u64>,
     max_tokens: Option<u32>,
     generated: u64,
     preemptions: u64,
-    queued: f64,
-    scheduled: f64,
+    queued: Option<f64>,
+    scheduled: Option<f64>,
     first: Option<f64>,
     last: f64,
     corrupted: bool,
@@ -322,33 +323,33 @@ impl VllmMetrics {
         if request.corrupted {
             self.inc("corrupted_requests", rank, 1, &[]);
         }
-        let first = request.first.unwrap_or_default();
-        let decode = request.last - first;
-        self.observe(
-            "request_queue_time_seconds",
-            rank,
-            request.scheduled - request.queued,
-        );
-        self.observe(
-            "request_prefill_time_seconds",
-            rank,
-            first - request.scheduled,
-        );
-        self.observe("request_decode_time_seconds", rank, decode);
-        self.observe(
-            "request_inference_time_seconds",
-            rank,
-            request.last - request.scheduled,
-        );
-        self.observe(
-            "request_time_per_output_token_seconds",
-            rank,
-            if request.generated > 1 {
-                decode / (request.generated - 1) as f64
-            } else {
-                0.0
-            },
-        );
+        // Errors/cancellations can finish before scheduling or the first
+        // token. An absent timestamp is not monotonic time zero: only observe
+        // phases whose endpoints actually occurred.
+        if let (Some(queued), Some(scheduled)) = (request.queued, request.scheduled) {
+            self.observe("request_queue_time_seconds", rank, scheduled - queued);
+        }
+        if let Some(first) = request.first {
+            let decode = request.last - first;
+            if let Some(scheduled) = request.scheduled {
+                self.observe("request_prefill_time_seconds", rank, first - scheduled);
+                self.observe(
+                    "request_inference_time_seconds",
+                    rank,
+                    request.last - scheduled,
+                );
+            }
+            self.observe("request_decode_time_seconds", rank, decode);
+            self.observe(
+                "request_time_per_output_token_seconds",
+                rank,
+                if request.generated > 1 {
+                    decode / (request.generated - 1) as f64
+                } else {
+                    0.0
+                },
+            );
+        }
     }
 
     fn output(
@@ -359,12 +360,27 @@ impl VllmMetrics {
         now: f64,
     ) -> u64 {
         let rank = request.engine;
-        let first = request.first.is_none();
+        for event in output.events.as_deref().unwrap_or_default() {
+            match event.r#type {
+                EngineCoreEventType::Queued => {
+                    request.queued.get_or_insert(event.timestamp);
+                }
+                EngineCoreEventType::Scheduled => {
+                    request.scheduled.get_or_insert(event.timestamp);
+                }
+                EngineCoreEventType::Preempted => {
+                    request.preemptions += 1;
+                    self.inc("num_preemptions", rank, 1, &[]);
+                }
+            }
+        }
+        request.corrupted |= output.num_nans_in_logits > 0;
         let mut computed = 0;
-        if first {
-            self.observe("time_to_first_token_seconds", rank, now - request.arrival);
-            request.first = Some(timestamp);
+        // Prefill accounting is independent of token timing (pooling outputs
+        // can carry prefill statistics without any generated tokens).
+        if !request.prefill_recorded {
             if let Some(prefill) = &output.prefill_stats {
+                request.prefill_recorded = true;
                 request.cached = u64::from(prefill.num_cached_tokens);
                 computed = u64::from(prefill.num_computed_tokens);
                 self.inc(
@@ -382,12 +398,20 @@ impl VllmMetrics {
                     self.inc("prompt_tokens_by_source", rank, u64::from(value), &[source]);
                 }
             }
-            // vLLM's decode frontend reports the remote prefill worker's
-            // cache hits in finished-request statistics. Per-iteration token
-            // counters above still use this engine's actual prefill stats.
-            if let Some(cached) = request.remote_cached {
-                request.cached = cached;
-            }
+        }
+        // vLLM's decode frontend reports the remote prefill worker's
+        // cache hits in finished-request statistics. Per-iteration token
+        // counters above still use this engine's actual prefill stats.
+        if let Some(cached) = request.remote_cached {
+            request.cached = cached;
+        }
+        // Terminal errors and event-only outputs do not produce a token.
+        if output.new_token_ids.is_empty() {
+            return computed;
+        }
+        if request.first.is_none() {
+            self.observe("time_to_first_token_seconds", rank, now - request.arrival);
+            request.first = Some(timestamp);
         } else {
             // One observation per engine output, including multi-token spec
             // decode steps, exactly as IterationStats (not divided by tokens).
@@ -405,20 +429,6 @@ impl VllmMetrics {
             output.new_token_ids.len() as u64,
             &[],
         );
-        request.corrupted |= output.num_nans_in_logits > 0;
-        for event in output.events.as_deref().unwrap_or_default() {
-            match event.r#type {
-                EngineCoreEventType::Queued => request.queued = event.timestamp,
-                EngineCoreEventType::Scheduled if request.scheduled == 0.0 => {
-                    request.scheduled = event.timestamp;
-                }
-                EngineCoreEventType::Scheduled => {}
-                EngineCoreEventType::Preempted => {
-                    request.preemptions += 1;
-                    self.inc("num_preemptions", rank, 1, &[]);
-                }
-            }
-        }
         computed + output.new_token_ids.len() as u64
     }
 

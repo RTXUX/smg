@@ -38,6 +38,7 @@ from smg_grpc_servicer.trace_context import trace_headers
 from smg_grpc_servicer.vllm import attach_vllm_logging, settle_logging
 from smg_grpc_servicer.vllm.admin import flush_cache, start_profile, stop_profile
 from smg_grpc_servicer.vllm.config_view import EngineConfigView, uses_mrope
+from smg_grpc_servicer.vllm.dp import local_dp_rank, served_dp_ranks
 from smg_grpc_servicer.vllm.errors import GracefulHTTPError, VLLMClientError, grpc_code_for
 from smg_grpc_servicer.vllm.kv_events import (
     rank_sources_for,
@@ -535,7 +536,7 @@ class VllmEngineServicer(vllm_engine_pb2_grpc.VllmEngineServicer):
                 request_id=request_id,
                 tokenization_kwargs=tokenization_kwargs,
                 trace_headers=trace_headers(context.invocation_metadata()),
-                data_parallel_rank=pinned_rank,
+                data_parallel_rank=local_dp_rank(self.engine, pinned_rank),
             ):
                 if not engine_started:
                     # The engine holds the request from its first output on
@@ -903,6 +904,13 @@ class VllmEngineServicer(vllm_engine_pb2_grpc.VllmEngineServicer):
             mm_media_ref_schemes=mm_media_ref_schemes,
             **facts,
         )
+        if "data_parallel_topology" in info.DESCRIPTOR.fields_by_name:
+            ranks = served_dp_ranks(self.engine)
+            if ranks is not None:
+                # Set presence even for an empty list: the endpoint then owns
+                # no ranks, instead of implying the legacy full-group shape.
+                info.data_parallel_topology.SetInParent()
+                info.data_parallel_topology.ranks.extend(ranks)
         # Where the processor mode came from, for the gateway's /workers; a
         # proto package predating the field simply leaves it out.
         if mm_processor and "mm_processor_source" in info.DESCRIPTOR.fields_by_name:

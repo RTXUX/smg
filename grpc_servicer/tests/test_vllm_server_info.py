@@ -10,6 +10,7 @@ from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from smg_grpc_proto import vllm_engine_pb2
 from smg_grpc_proto.generated import common_pb2
 from smg_grpc_servicer.vllm import model_info
+from smg_grpc_servicer.vllm.dp import served_dp_ranks
 
 _SERVICER = Path(__file__).parents[1] / "smg_grpc_servicer" / "vllm" / "servicer.py"
 
@@ -34,6 +35,7 @@ def _server_info_method(response_type):
         "mm_item_limits": model_info.mm_item_limits,
         "engine_reasoning_parser": model_info.engine_reasoning_parser,
         "constrained_decoding_start": model_info.constrained_decoding_start,
+        "served_dp_ranks": served_dp_ranks,
     }
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(_SERVICER), "exec"), namespace)
     return namespace["GetServerInfo"]
@@ -115,6 +117,59 @@ def _response_type_without(*names):
     )
 
 
+def _topology_response_type(legacy):
+    """Exercise new and old schemas even with released protobuf stubs installed."""
+    descriptor = descriptor_pb2.FileDescriptorProto.FromString(
+        vllm_engine_pb2.DESCRIPTOR.serialized_pb
+    )
+    response = next(m for m in descriptor.message_type if m.name == "GetServerInfoResponse")
+    field = next((f for f in response.field if f.name == "data_parallel_topology"), None)
+    if legacy and field is not None:
+        response.field.remove(field)
+    elif not legacy and field is None:
+        topology = descriptor.message_type.add(name="DataParallelTopology")
+        topology.field.add(name="ranks", number=1, label=3, type=5)
+        response.field.add(
+            name="data_parallel_topology",
+            number=27,
+            label=1,
+            type=11,
+            type_name=".vllm.grpc.engine.DataParallelTopology",
+        )
+    pool = descriptor_pool.DescriptorPool()
+    pool.AddSerializedFile(common_pb2.DESCRIPTOR.serialized_pb)
+    pool.Add(descriptor)
+    return message_factory.GetMessageClass(
+        pool.FindMessageTypeByName("vllm.grpc.engine.GetServerInfoResponse")
+    )
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("ranks", [None, [], [8], [8, 10, 15], list(range(16))])
+def test_get_server_info_advertises_dp_topology(legacy, ranks):
+    response_type = _topology_response_type(legacy)
+    config = SimpleNamespace(
+        model_config=SimpleNamespace(dtype="torch.bfloat16", is_multimodal_model=False),
+        parallel_config=SimpleNamespace(data_parallel_size=16),
+    )
+    servicer = SimpleNamespace(
+        engine=SimpleNamespace(
+            vllm_config=config, engine_core=SimpleNamespace(engine_ranks_managed=ranks)
+        ),
+        _mm_processor=None,
+        _mm_encoder_budget=0,
+    )
+    info = asyncio.run(_server_info_method(response_type)(servicer, None, None))
+    info = response_type.FromString(info.SerializeToString())
+    assert info.data_parallel_size == 16
+    if legacy:
+        assert "data_parallel_topology" not in info.DESCRIPTOR.fields_by_name
+    else:
+        assert info.HasField("data_parallel_topology") == (ranks is not None)
+        if ranks is not None:
+            assert list(info.data_parallel_topology.ranks) == ranks
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_get_server_info_reports_where_the_engine_starts_a_grammar(legacy):
     """The handler sets the reasoning-parser facts off the structured-outputs config when the
@@ -164,3 +219,10 @@ def test_get_server_info_reports_the_engines_encoder_budget(legacy):
     servicer._mm_encoder_budget = 0
     info = asyncio.run(_server_info_method(response_type)(servicer, None, None))
     assert info.mm_encoder_budget == 0
+
+
+def test_dp_topology_preserves_upstream_field_numbers():
+    fields = vllm_engine_pb2.GetServerInfoResponse.DESCRIPTOR.fields_by_name
+    assert fields["mm_encoder_budget"].number == 25
+    assert fields["structural_tag_vocabulary"].number == 26
+    assert fields["data_parallel_topology"].number == 27

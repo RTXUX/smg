@@ -73,7 +73,7 @@ def add_servicer_impl_argument(parser: argparse.ArgumentParser) -> bool:
 
 
 def add_metrics_arguments(parser: argparse.ArgumentParser) -> bool:
-    """Add ``--metrics-port`` and ``--metrics-host`` (the Rust servicer's
+    """Add ``--metrics-port`` and ``--metrics-host`` (either servicer's
     Prometheus endpoint) to a parser that serves gRPC and lacks them; returns
     whether they were added."""
     if not serves_grpc(parser):
@@ -83,6 +83,7 @@ def add_metrics_arguments(parser: argparse.ArgumentParser) -> bool:
         port_env=METRICS_PORT_ENV,
         host_env=METRICS_HOST_ENV,
         server_class="smg.servicer.VllmGrpcServer",
+        python_supported=True,
     )
 
 
@@ -169,8 +170,8 @@ def check_servicer_impl(parser: argparse.ArgumentParser, parsed: Any) -> str | N
         return None
     from smg_grpc_servicer.rust_lifecycle import (
         ServicerConfigError,
-        check_metrics_port_needs_rust,
         configuration_exit,
+        metrics_bind_address,
     )
     from smg_grpc_servicer.vllm.launcher_switch import require_launcher_hook
     from smg_grpc_servicer.vllm.rust import configure_logging, resolve_servicer_impl
@@ -179,9 +180,7 @@ def check_servicer_impl(parser: argparse.ArgumentParser, parsed: Any) -> str | N
         impl = resolve_servicer_impl(parsed)
         if impl == "rust":
             require_launcher_hook()
-        # A metrics port under the Python servicer is a port nobody serves:
-        # refused here, with the other configuration errors.
-        check_metrics_port_needs_rust(impl, parsed, METRICS_PORT_ENV)
+        metrics_bind_address(parsed, port_env=METRICS_PORT_ENV, host_env=METRICS_HOST_ENV)
     except ServicerConfigError as error:
         configure_logging()
         raise configuration_exit(error) from None

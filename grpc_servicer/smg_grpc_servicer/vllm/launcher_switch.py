@@ -191,7 +191,14 @@ def with_servicer_switch(
         # package's warnings and errors reach stderr as they do without it.
         # (The Rust path's configure_logging ended it above.)
         settle_logging()
-        return await serve_grpc(args, *rest, **kwargs)
+        from smg_grpc_servicer.vllm.metrics import metrics_server
+
+        try:
+            async with metrics_server(args):
+                return await serve_grpc(args, *rest, **kwargs)
+        except ServicerConfigError as error:
+            configure_logging()
+            raise configuration_exit(error) from None
 
     setattr(serve_grpc_with_switch, _SWITCH_MARK, True)
     return serve_grpc_with_switch

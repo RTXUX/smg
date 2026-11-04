@@ -36,7 +36,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-vllm = ["vllm>=0.19.0", "pyzmq>=25.0.0", "msgspec>=0.18.0"]
+vllm = ["vllm>=0.19.0", "pyzmq>=25.0.0", "msgspec>=0.18.0", "aiohttp>=3.9", "prometheus-client>=0.21"]
 # Redis media-processing sidecar backend for vLLM (SMG_VLLM_MM_PROCESSOR=redis).
 vllm-redis = ["redis>=5.0", "msgspec>=0.18.0"]
 # 0.5.21 (sgl-project/sglang#40638) dropped the attn_cp_rank, moe_dp_rank and

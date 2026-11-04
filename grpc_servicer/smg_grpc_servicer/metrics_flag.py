@@ -1,6 +1,6 @@
 """The ``--metrics-port`` and ``--metrics-host`` flags the engine launchers
-register for the Rust servicer's Prometheus endpoint: their names and the one
-registration the three launchers share.
+register for the servicers' Prometheus endpoints. The Rust launchers share
+one registration; vLLM also enables it for its Python implementation.
 
 Stdlib only on purpose, like the servicer-implementation flag: the engine
 plugins that add the flags are loaded in every engine process and import
@@ -54,10 +54,12 @@ def add_metrics_arguments(
     port_env: str,
     host_env: str,
     server_class: str,
+    python_supported: bool = False,
 ) -> bool:
     """Add ``--metrics-port`` and ``--metrics-host`` to a launcher's parser
     that lacks them; returns whether they were added. ``server_class`` names
-    the Rust server the help text points at."""
+    the Rust server the help text points at. ``python_supported`` also permits
+    the Python implementation in that help text."""
     actions = parser._option_string_actions  # noqa: SLF001 — argparse's registry of option strings
     if METRICS_PORT_FLAG in actions:
         return False
@@ -69,10 +71,12 @@ def add_metrics_arguments(
         action=_EnvStoreAction,
         env_name=port_env,
         help=(
-            "Serve Prometheus metrics (GET /metrics) of the Rust servicer "
-            f"({server_class}) on this port, on a listener of its own; 0 binds an "
+            "Serve Prometheus metrics (GET /metrics) "
+            + ("of either Python or Rust servicers " if python_supported else f"of {server_class} ")
+            + "on this port, on a listener of its own; 0 binds an "
             f"ephemeral one. Unset falls back to ${port_env}; unset there too, no "
-            "endpoint. Needs the Rust implementation; must differ from the gRPC port."
+            "endpoint. Must differ from the gRPC port."
+            + ("" if python_supported else " Needs the Rust implementation.")
         ),
     )
     parser.add_argument(

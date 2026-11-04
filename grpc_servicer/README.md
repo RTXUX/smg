@@ -287,6 +287,22 @@ if resolve_servicer_impl(args) == "rust":
 
 ##### Metrics (`--metrics-port`)
 
+Both vLLM servicers accept `--metrics-port` and `--metrics-host`, with the
+`SMG_VLLM_SERVICER_METRICS_PORT` / `SMG_VLLM_SERVICER_METRICS_HOST` environment
+fallbacks. Scrape `http://<metrics-host>:<metrics-port>/metrics` directly.
+The Python implementation exports vLLM's native Prometheus registry, including
+its multiprocess registry when configured. Native labels, counters and
+histogram buckets are preserved; `--disable-log-stats` controls vLLM's metric
+collection. Scrapes serialize off the inference event loop. The listener binds
+before engine startup and closes when the launcher returns, fails or is
+cancelled. Unset means no endpoint; a busy port or a port equal to the gRPC
+port fails startup.
+
+```bash
+vllm serve Qwen/Qwen3-0.6B --grpc --port 50051 --servicer-impl python --metrics-port 29100
+curl -s http://127.0.0.1:29100/metrics
+```
+
 The Rust servicer serves Prometheus metrics on a listener of its own when
 asked: `--metrics-port <port>` (`--metrics-host` picks the interface; it
 defaults to the gRPC `--host`), or the environment form
@@ -302,8 +318,7 @@ the engine connects (a scrape during the engine's start answers
 the warm-up's own requests only) reads `warming_up`, a drain `draining`), runs
 on its own thread, and closes
 with the servicer; a port equal to `--port` is refused before the engine
-starts, and the flag needs `--servicer-impl rust` (the Python servicer exposes
-no endpoint). A planned warm-up's own requests go through the request path
+starts. A planned warm-up's own requests go through the request path
 and are counted like any other, so the first scrapes include them.
 
 ```bash

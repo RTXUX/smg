@@ -881,7 +881,18 @@ impl ServerInfo {
                 }
                 labels
             }
-            ServerInfo::Vllm(info) => flat_labels(info),
+            ServerInfo::Vllm(info) => {
+                let mut labels = flat_labels(info);
+                if let Some(topology) = &info.data_parallel_topology {
+                    // Keep an explicit empty list: it means no routable ranks,
+                    // whereas a missing topology is a legacy advertisement.
+                    labels.insert(
+                        "dp_ranks".to_string(),
+                        serde_json::json!(topology.ranks).to_string(),
+                    );
+                }
+                labels
+            }
             ServerInfo::Trtllm(info) => flat_labels(info),
             ServerInfo::Mlx(info) => flat_labels(info),
             ServerInfo::TokenSpeed(info) => {

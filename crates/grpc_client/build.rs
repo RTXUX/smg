@@ -57,6 +57,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize)]",
         )
         .type_attribute(
+            "vllm.grpc.engine.DataParallelTopology",
+            "#[derive(serde::Serialize)]",
+        )
+        .type_attribute(
             "trtllm.GetServerInfoResponse",
             "#[derive(serde::Serialize)]",
         )

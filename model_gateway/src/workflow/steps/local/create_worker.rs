@@ -1101,8 +1101,8 @@ fn attention_dp_width(labels: &HashMap<String, String>, size: usize) -> Option<u
         .then_some(size as u64)
 }
 
-/// Ranks to register for a dp-aware worker. A width above one expands into
-/// one dp-annotated worker per rank. A width-1 advertisement (older
+/// Ranks to register for a dp-aware worker. Explicit endpoint ownership wins;
+/// legacy metadata expands the full group. A width-1 advertisement (older
 /// servicers emit it as a capability signal) and a missing one both
 /// register a plain worker: there is no placement to choose, and pinning
 /// rank 0 anyway still alters engine-side scheduling. discover_dp already
@@ -1115,7 +1115,12 @@ fn dp_rank_expansion(
     match dp_info {
         Some(dp_info) if dp_info.dp_size > 1 => {
             validate_zmq_dp(connection_mode, dp_info.dp_size, url)?;
-            Ok((0..dp_info.dp_size)
+            let ranks = dp_info
+                .dp_ranks
+                .clone()
+                .unwrap_or_else(|| (0..dp_info.dp_size).collect());
+            Ok(ranks
+                .into_iter()
                 .map(|r| Some((r, dp_info.dp_size)))
                 .collect())
         }
@@ -1546,6 +1551,7 @@ mod tests {
             ("max_running_requests".to_string(), "256".to_string()),
         ]);
         data.dp_info = Some(DpInfo {
+            dp_ranks: None,
             dp_size: 8,
             model_id: "m".to_string(),
         });
@@ -1580,6 +1586,7 @@ mod tests {
         data.discovered_labels =
             HashMap::from([("max_running_requests".to_string(), "256".to_string())]);
         data.dp_info = Some(DpInfo {
+            dp_ranks: None,
             dp_size: 8,
             model_id: "m".to_string(),
         });
@@ -1911,9 +1918,26 @@ mod tests {
     }
 
     #[test]
+    fn dp_topology_expands_only_endpoint_ranks() {
+        for ranks in [vec![8], vec![8, 10, 15]] {
+            let info = DpInfo {
+                dp_size: 16,
+                dp_ranks: Some(ranks.clone()),
+                model_id: "m".into(),
+            };
+            let expected: Vec<_> = ranks.into_iter().map(|rank| Some((rank, 16))).collect();
+            assert_eq!(
+                dp_rank_expansion(Some(&info), ConnectionMode::Grpc, "grpc://w:1").unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn dp_expansion_pins_only_multi_rank_widths() {
         let multi = DpInfo {
             dp_size: 3,
+            dp_ranks: None,
             model_id: "m".to_string(),
         };
         assert_eq!(
@@ -1925,6 +1949,7 @@ mod tests {
         // and a rank-0 pin would still alter engine scheduling.
         let single = DpInfo {
             dp_size: 1,
+            dp_ranks: None,
             model_id: "m".to_string(),
         };
         assert_eq!(

@@ -236,6 +236,8 @@ message GenerateRequest {
   optional string kv_transfer_params_json = 8;
 
   // DP rank to pin this request to; unset lets the engine balance internally
+  // Global DP rank, as advertised by GetServerInfo.data_parallel_topology.
+  // The Python servicer translates this to AsyncLLM's frontend-local index.
   optional int32 data_parallel_rank = 9;
 
   // Set only when the router skipped multimodal processing. Mutually
@@ -414,6 +416,13 @@ message GetModelInfoResponse {
 
 message GetServerInfoRequest {}
 
+// Endpoint ownership, distinct from the distributed group's total DP size.
+// Message presence distinguishes legacy servers (unknown) from an endpoint
+// that explicitly reports no connected ranks (not ready for DP routing).
+message DataParallelTopology {
+  repeated int32 ranks = 1;  // Unique global rank IDs served by this endpoint.
+}
+
 message GetServerInfoResponse {
   uint32 active_requests = 1;
   bool is_paused = 2;
@@ -526,6 +535,10 @@ message GetServerInfoResponse {
   // language; a `token` node stays as derived, so a table that writes
   // single-token markers still meets the older compiler's refusal.
   string structural_tag_vocabulary = 26;
+
+  // Absent on legacy servers: routers retain the historical 0..DP-1 fallback.
+  // When present, only these ranks may be selected through this endpoint.
+  DataParallelTopology data_parallel_topology = 27;
 }
 
 // =====================

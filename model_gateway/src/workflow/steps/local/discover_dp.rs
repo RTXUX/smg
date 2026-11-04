@@ -18,6 +18,9 @@ use crate::{
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DpInfo {
     pub dp_size: usize,
+    /// Global ranks reachable through this endpoint; None is legacy full-group metadata.
+    #[serde(default)]
+    pub dp_ranks: Option<Vec<usize>>,
     pub model_id: String,
 }
 
@@ -46,7 +49,11 @@ pub async fn get_dp_info(
         })
         .unwrap_or_else(|| UNKNOWN_MODEL_ID.to_string());
 
-    Ok(DpInfo { dp_size, model_id })
+    Ok(DpInfo {
+        dp_size,
+        dp_ranks: None,
+        model_id,
+    })
 }
 
 /// Build DP info from gRPC-discovered metadata labels, normalized by metadata discovery.
@@ -62,9 +69,28 @@ pub fn dp_info_from_labels(labels: &HashMap<String, String>) -> Result<DpInfo, S
             .transpose()
     };
     let dp_size = routing_dp_size(width("dp_size")?, width("attn_dp_size")?)?;
+    let dp_ranks = labels
+        .get("dp_ranks")
+        .map(|value| {
+            let ranks: Vec<usize> = serde_json::from_str(value)
+                .map_err(|error| format!("invalid dp_ranks: {error}"))?;
+            let mut seen = std::collections::HashSet::new();
+            if ranks.is_empty()
+                || ranks
+                    .iter()
+                    .any(|&rank| rank >= dp_size || !seen.insert(rank))
+            {
+                return Err(format!(
+                    "dp_ranks must be nonempty, unique, and within 0..{dp_size}: {value}"
+                ));
+            }
+            Ok(ranks)
+        })
+        .transpose()?;
 
     Ok(DpInfo {
         dp_size,
+        dp_ranks,
         model_id: model_id_from_labels(labels),
     })
 }
@@ -106,6 +132,7 @@ fn model_id_from_labels(labels: &HashMap<String, String>) -> String {
 fn zmq_dp_info(config: &WorkerSpec, labels: &HashMap<String, String>) -> DpInfo {
     DpInfo {
         dp_size: config.dp_size.unwrap_or(1).max(1),
+        dp_ranks: None,
         model_id: model_id_from_labels(labels),
     }
 }
@@ -151,6 +178,14 @@ impl StepExecutor<WorkerWorkflowData> for DiscoverDPInfoStep {
             Some(ConnectionMode::Grpc) => {
                 match dp_info_from_labels(&context.data.discovered_labels) {
                     Ok(info) => info,
+                    Err(e) if context.data.discovered_labels.contains_key("dp_ranks") => {
+                        // An explicit ownership advertisement must never fall
+                        // back to an unpinned or invented full-group worker.
+                        return Err(WorkflowError::StepFailed {
+                            step_id: StepId::new("discover_dp_info"),
+                            message: format!("Invalid DP topology for {}: {e}", config.url),
+                        });
+                    }
                     Err(e) => {
                         warn!(
                             "No DP info for {} ({e}); registering as a single \
@@ -245,6 +280,26 @@ mod tests {
     fn dp_info_from_labels_unknown_model_when_absent() {
         let info = dp_info_from_labels(&labels(&[("dp_size", "2")])).unwrap();
         assert_eq!(info.model_id, UNKNOWN_MODEL_ID);
+    }
+
+    #[test]
+    fn dp_topology_validates_explicit_ownership() {
+        let info =
+            dp_info_from_labels(&labels(&[("dp_size", "16"), ("dp_ranks", "[8,10,15]")])).unwrap();
+        assert_eq!(info.dp_size, 16);
+        assert_eq!(info.dp_ranks, Some(vec![8, 10, 15]));
+        assert_eq!(
+            dp_info_from_labels(&labels(&[("dp_size", "16")]))
+                .unwrap()
+                .dp_ranks,
+            None
+        );
+        for invalid in ["[]", "[8,8]", "[16]", "[-1]", "[1.5]", "[true]", "not-json"] {
+            assert!(
+                dp_info_from_labels(&labels(&[("dp_size", "16"), ("dp_ranks", invalid)])).is_err(),
+                "{invalid}"
+            );
+        }
     }
 
     #[test]

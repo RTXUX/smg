@@ -797,6 +797,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dp_topology_survives_grpc_metadata_normalization() {
+        use smg_grpc_client::vllm_proto;
+
+        use crate::{
+            routers::grpc::client::ServerInfo,
+            workflow::steps::local::discover_dp::dp_info_from_labels,
+        };
+        for ranks in [None, Some(vec![8]), Some(vec![8, 10, 15]), Some(vec![])] {
+            let info = ServerInfo::Vllm(Box::new(vllm_proto::GetServerInfoResponse {
+                data_parallel_size: 16,
+                data_parallel_topology: ranks
+                    .clone()
+                    .map(|ranks| vllm_proto::DataParallelTopology { ranks }),
+                ..Default::default()
+            }));
+            let mut labels = info.to_labels();
+            normalize_grpc_keys(&mut labels);
+            let discovered = dp_info_from_labels(&labels);
+            if ranks.as_ref().is_some_and(Vec::is_empty) {
+                assert!(discovered.is_err());
+            } else {
+                let discovered = discovered.unwrap();
+                assert_eq!(discovered.dp_size, 16);
+                assert_eq!(
+                    discovered.dp_ranks,
+                    ranks.map(|ranks| ranks.into_iter().map(|rank| rank as usize).collect())
+                );
+            }
+        }
+    }
+
     /// Every engine's spelling of the parallelism widths folds into the
     /// canonical labels, and an existing canonical label is never overwritten.
     #[test]

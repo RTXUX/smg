@@ -12,8 +12,9 @@ The shapes are the ones SMG's gateway sends today, the same fields in the same p
 - a call begins with its `id`, `type: "function"` and `name` and no arguments; every later
   fragment carries the call's `index` and `arguments` only;
 - the finishing choice has an empty delta without a role;
-- the whole message has `content` null when it is only whitespace, `reasoning_content` only when
-  there was reasoning, and `tool_calls` only when a call was made, each call with its id, name
+- the whole message has `content` null only when empty; whitespace-only content is retained so
+  streaming and non-streaming clients can replay the same prompt prefix. It has `reasoning_content`
+  only when there was reasoning, and `tool_calls` only when a call was made, each call with its id, name
   and its argument fragments joined.
 
 One rule for `finish_reason`, in both shapes: the engine's reason, except that `stop` after at least

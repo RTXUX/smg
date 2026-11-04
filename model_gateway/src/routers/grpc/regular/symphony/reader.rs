@@ -814,13 +814,17 @@ mod tests {
     /// whose adapter leaves whitespace-only content out, as the Messages and Responses adapters
     /// do; the output is still counted as `empty`, once.
     #[test]
-    fn a_whole_chat_message_of_whitespace_alone_has_no_content_and_counts_as_empty() {
+    fn a_whole_chat_message_keeps_whitespace_and_counts_as_empty() {
         use symphony::{adapt::chat::message, formats::minimax_m3};
         let scrape = rendered(|| {
             let events = read_pieces(minimax_m3(), "]~b]ai\n", &newlines(3), EngineFinish::Stop);
             assert_eq!(content_events(&events).0, vec!["\n\n\n"]);
             let choice = message(0, &events);
-            assert_eq!(choice.message.content, None, "{events:?}");
+            assert_eq!(
+                choice.message.content.as_deref(),
+                Some("\n\n\n"),
+                "{events:?}"
+            );
             assert!(choice.message.tool_calls.is_none());
             assert!(choice.message.reasoning_content.is_none());
             assert_eq!(choice.finish_reason.as_deref(), Some("stop"));

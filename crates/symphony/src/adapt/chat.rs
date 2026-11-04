@@ -217,7 +217,7 @@ pub fn deltas<'a, 'd: 'a>(
 
 /// One message for the choice at `choice`, folded from a whole event sequence.
 ///
-/// `content` is every content and malformed text in order, absent when it is only whitespace;
+/// `content` is every content and malformed text in order, absent when empty;
 /// `reasoning_content` is every reasoning text, absent when there was none; `tool_calls` lists the
 /// calls in the order they started, absent when there was none; `finish_reason` is set by the
 /// `Finish` event, so a sequence without one gives a message that is not finished. Argument
@@ -244,7 +244,7 @@ pub fn message<'a, 'd: 'a>(
         index: choice,
         message: ChatCompletionMessage {
             role: "assistant".to_string(),
-            content: (!folded.content.trim().is_empty()).then_some(folded.content),
+            content: (!folded.content.is_empty()).then_some(folded.content),
             refusal: None,
             annotations: Vec::new(),
             tool_calls: (!calls.is_empty()).then_some(calls),
@@ -661,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn whitespace_only_content_and_absent_reasoning_and_calls_are_left_out() {
+    fn whitespace_only_content_is_kept_for_replay() {
         let events = [
             Event::Content(Text::uncounted("  \n")),
             finish(FinishReason::Stop, 0),
@@ -670,7 +670,7 @@ mod tests {
             serde_json::to_value(message(0, &events)).expect("serializable"),
             json!({
                 "index": 0,
-                "message": {"role": "assistant", "content": null, "refusal": null, "annotations": [], "reasoning_content": null},
+                "message": {"role": "assistant", "content": "  \n", "refusal": null, "annotations": [], "reasoning_content": null},
                 "logprobs": null,
                 "finish_reason": "stop",
             })

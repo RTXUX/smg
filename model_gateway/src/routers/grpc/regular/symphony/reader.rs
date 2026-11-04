@@ -534,7 +534,7 @@ impl Reader {
         // dropped before a thought is the template's.
         if !self.called {
             let mut at = start;
-            for event in fresh.iter() {
+            for event in fresh.iter_mut() {
                 let bytes = telemetry::bytes_of(event);
                 match event {
                     Event::Dropped {
@@ -547,6 +547,19 @@ impl Reader {
                         let marker =
                             matches!(why, DropReason::Wrapper) && !text.text.trim().is_empty();
                         self.hold_framing(&text.text, at, marker);
+                    }
+                    Event::Content(text)
+                        if !self.refused.is_empty() && text.text.trim().is_empty() =>
+                    {
+                        // A table that keeps content whitespace can emit the
+                        // gap between refused blocks. Hold it with those
+                        // blocks, as the dropped wrapper gap was held.
+                        self.hold_framing(&text.text, at, false);
+                        let text = std::mem::replace(text, Text::uncounted(""));
+                        *event = Event::Dropped {
+                            text,
+                            why: DropReason::Whitespace,
+                        };
                     }
                     Event::Content(text) | Event::Malformed { text, .. }
                         if !text.text.is_empty() =>

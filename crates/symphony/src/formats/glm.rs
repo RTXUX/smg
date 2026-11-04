@@ -5,8 +5,8 @@
 //! is never content: refused and counted (`keyed`). The prompt opens
 //! the thought (`<|assistant|><think>`, whatever the request says: the template has no thinking
 //! switch, only `clear_thinking` for the history), so an empty thought writes `</think>` at once;
-//! a turn opens with `<|assistant|>`, so the prompt's replay starts there. The template strips the
-//! content's edges and writes the calls right after it, so a call follows the content's last byte.
+//! a turn opens with `<|assistant|>`, so the prompt's replay starts there. The prefix-preserving
+//! template keeps content edges; SMG keeps argument spelling, writing calls after the content.
 //! Recorded as `glm-5.3-flash` (zai-org/GLM-5.3-Flash). Ling writes the same syntax with newlines
 //! between the tags and under its own turn opener ([`ling()`](super::ling())).
 
@@ -23,6 +23,7 @@ pub fn glm() -> Format {
         .terminal("call_open", "<tool_call>")
         .terminal("call_close", "</tool_call>")
         .state("content", Emits::Content)
+        .keeps("content")
         .state("reasoning", Emits::Reasoning)
         .state("call", Emits::Arguments)
         .transition("content", "think_open", "reasoning")

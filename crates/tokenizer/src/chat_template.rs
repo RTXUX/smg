@@ -15,6 +15,7 @@ use chrono::{
     format::{strftime::StrftimeItems, Item},
     DateTime, FixedOffset, Local, TimeZone,
 };
+use indexmap::IndexMap;
 use minijinja::{
     context,
     machinery::{
@@ -26,7 +27,7 @@ use minijinja::{
     Environment, Error as MinijinjaError, ErrorKind, Output, State, Value,
 };
 use serde::Serialize;
-use serde_json::{self, ser::Formatter, Value as JsonValue};
+use serde_json::{self, ser::Formatter, value::RawValue, Value as JsonValue};
 
 /// Chat template content format
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1476,6 +1477,53 @@ fn tojson_filter(value: Value, kwargs: Kwargs) -> std::result::Result<Value, Min
     json_str.map(Value::from_safe_string)
 }
 
+/// Ordered `(name, text)` pairs for a tagged tool-call template. String values
+/// decode to their exact bytes; other values retain their original JSON spelling
+/// instead of being parsed and serialized again. Templates opt in by calling this
+/// helper on `function.arguments` and writing each value directly between tags.
+/// Object-form arguments also work, but have no original JSON spelling to retain.
+fn tool_argument_items(value: Value) -> std::result::Result<Value, MinijinjaError> {
+    let invalid = |error: serde_json::Error| {
+        MinijinjaError::new(
+            ErrorKind::InvalidOperation,
+            format!("tool_argument_items requires a JSON object: {error}"),
+        )
+    };
+    let original = match value.as_str() {
+        Some(text) => Cow::Borrowed(text),
+        None => Cow::Owned(serde_json::to_string(&value).map_err(invalid)?),
+    };
+    let values: IndexMap<String, Box<RawValue>> =
+        serde_json::from_str(&original).map_err(invalid)?;
+    let items: Vec<_> = values
+        .into_iter()
+        .map(|(key, value)| {
+            let text = serde_json::from_str::<String>(value.get())
+                .unwrap_or_else(|_| value.get().to_owned());
+            (key, text)
+        })
+        .collect();
+    Ok(Value::from_serialize(items))
+}
+
+/// A helper call, not its name in a comment or string, opts a template into
+/// receiving argument strings before the gateway's ordinary JSON parsing.
+fn uses_tool_argument_items(template: &str) -> bool {
+    let template = plain_generation_blocks(template);
+    let Ok(ast) = parse(
+        &template,
+        "template",
+        SyntaxConfig {},
+        WhitespaceConfig::default(),
+    ) else {
+        return false;
+    };
+    Nodes::of(&ast)
+        .calls
+        .iter()
+        .any(|call| is_var(&call.expr, "tool_argument_items"))
+}
+
 /// Recursively sort all object keys in a JSON value
 fn sort_json_keys(value: &JsonValue) -> JsonValue {
     match value {
@@ -1673,6 +1721,7 @@ fn build_environment(template: String) -> Result<Environment<'static>> {
     env.add_filter("capitalize", python_capitalize_filter);
     env.add_filter("title", python_title_filter);
     env.add_function("raise_exception", raise_exception);
+    env.add_function("tool_argument_items", tool_argument_items);
     // Jinja2's dict() also builds a map from key/value pairs; minijinja's takes a mapping only
     env.add_function("dict", dict_function);
     env.add_test("iterable", is_iterable);
@@ -2785,6 +2834,7 @@ impl ChatTemplateState {
             .as_deref()
             .is_none_or(detect_developer_role_support);
         let root_role_supported = template.as_deref().is_none_or(detect_root_role_support);
+        let raw_tool_call_arguments = template.as_deref().is_some_and(uses_tool_argument_items);
         let env = template.map(build_environment).transpose()?;
         let mut state = Self {
             env,
@@ -2795,11 +2845,11 @@ impl ChatTemplateState {
             prefill_opens_think_block,
             developer_role_supported,
             root_role_supported,
-            raw_tool_call_arguments: false,
+            raw_tool_call_arguments,
             tool_use: None,
             processor: None,
         };
-        state.raw_tool_call_arguments = state.writes_tool_call_arguments_as_text();
+        state.raw_tool_call_arguments |= state.writes_tool_call_arguments_as_text();
         Ok(state)
     }
 
@@ -3100,7 +3150,9 @@ impl ChatTemplateState {
         ) = detect_all(&template);
         let developer_role_supported = detect_developer_role_support(&template);
         let root_role_supported = detect_root_role_support(&template);
+        let raw_tool_call_arguments = uses_tool_argument_items(&template);
         let env = build_environment(template)?;
+        self.raw_tool_call_arguments = raw_tool_call_arguments;
         self.developer_role_supported = developer_role_supported;
         self.root_role_supported = root_role_supported;
         self.content_format = content_format;
@@ -3112,7 +3164,7 @@ impl ChatTemplateState {
         // A replacement template stands alone, as a template file does.
         self.tool_use = None;
         self.processor = None;
-        self.raw_tool_call_arguments = self.writes_tool_call_arguments_as_text();
+        self.raw_tool_call_arguments |= self.writes_tool_call_arguments_as_text();
         Ok(())
     }
 

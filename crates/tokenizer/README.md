@@ -109,6 +109,23 @@ as of `tokenizer/src/*`.
 - The tokenizer wrapper stores both the template string and its detected content format so callers
   can pre-transform message content correctly.
 
+Tagged tool-call templates can preserve replay spelling with the shared SMG Jinja helper
+`tool_argument_items(function.arguments)`. It returns ordered `(name, text)` pairs: JSON strings
+decode to their exact text, including indentation, quotes and trailing whitespace; other values
+retain their original JSON spelling, including nested spacing, escapes and numeric notation.
+Render `text` directly rather than applying `tojson` again:
+
+```jinja
+{% for name, text in tool_argument_items(tc.arguments) %}
+<arg_key>{{ name }}</arg_key><arg_value>{{ text }}</arg_value>
+{% endfor %}
+```
+
+A template calling this helper receives the original argument JSON string through the gateway.
+Object-form arguments also work, but their original JSON spelling is already unavailable.
+Templates not calling it keep the usual parsed-object contract. The helper works with both
+Hugging Face and tiktoken backends, without model-name dispatch or template source replacement.
+
 ## Streaming and Stateful Helpers
 ### `DecodeStream` (`stream.rs`)
 - Maintains a sliding window (`prefix_offset`, `read_offset`) over accumulated token IDs.

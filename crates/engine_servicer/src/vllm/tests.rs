@@ -1385,6 +1385,61 @@ async fn info_rpcs_report_config_and_handshake_facts() {
     h.server.stop(Duration::from_secs(5)).expect("clean stop");
 }
 
+/// A frontend may connect a subset of a larger DP group. Ownership comes
+/// from connected ZMQ identities, including when no load has arrived yet.
+#[tokio::test]
+async fn dp_topology_reports_connected_ranks_and_preserves_global_size() {
+    for (ranks, ready_size) in [(vec![8], 16), (vec![8, 10], 16), (vec![0, 1], 1)] {
+        let dir = tempfile::tempdir().unwrap();
+        let handshake = handshake_address(dir.path());
+        let mut model = model_info();
+        model.data_parallel_size = 16;
+        let mut cfg = config(dir.path(), &handshake, model);
+        cfg.servicer.engine_count = ranks.len();
+        let server = VllmServicerServer::start(cfg).unwrap();
+        let mut client = VllmEngineClient::new(grpc_channel(server.address()).await);
+        let pending = client
+            .get_server_info(vllm::GetServerInfoRequest {})
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(pending.data_parallel_topology.unwrap().ranks.is_empty());
+        let engines = futures::future::try_join_all(ranks.iter().map(|&rank| {
+            let mut ready = default_ready_response();
+            ready.data_parallel_size = ready_size;
+            ready.data_parallel_rank = rank;
+            connect_to_frontend(&handshake, EngineId::from_engine_index(rank), ready)
+        }))
+        .await
+        .unwrap();
+        wait_until(|| server.engine_ready()).await;
+        let info = client
+            .get_server_info(vllm::GetServerInfoRequest {})
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(info.data_parallel_size, 16);
+        let expected: Vec<_> = ranks.iter().map(|&rank| rank as i32).collect();
+        assert_eq!(info.data_parallel_topology.unwrap().ranks, expected);
+        let loads = client
+            .get_loads(vllm::GetLoadsRequest::default())
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            loads
+                .loads
+                .iter()
+                .map(|load| load.dp_rank)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(loads.dp_rank_count, ranks.len() as i32);
+        server.stop(Duration::from_secs(5)).unwrap();
+        drop(engines);
+    }
+}
+
 /// Encoder metadata accepts only supported floats while PD pairing retains
 /// the selected model dtype, including the handshake fallback.
 #[tokio::test]

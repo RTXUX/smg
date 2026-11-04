@@ -51,6 +51,36 @@ submitting to vLLM, whose smaller numeric priority is more urgent: `10` becomes
 to enable priority scheduling. The header survives batches, prefill/decode
 splits, retries, and Responses tool iterations, including background work.
 
+#### DP rank ownership
+
+`GetServerInfo.data_parallel_size` is the global DP group size.
+`data_parallel_topology.ranks` lists the global ranks reachable through this
+endpoint. With `--dp-aware`, the gateway registers only those ranks: a DP=16
+worker reporting `[8, 10]` becomes `worker@8` and `worker@10`. A singleton
+external-balancing endpoint reporting `[8]` becomes just `worker@8`.
+
+The Python servicer reports `engine_core.engine_ranks_managed` and translates
+the gRPC global rank pin into AsyncLLM's frontend-local engine index. The Rust
+servicer reports its connected ZMQ engine identities and routes pins by those
+identities. An explicitly empty topology means no ranks are ready; empty,
+duplicate, negative or out-of-group ranks fail DP-aware registration.
+
+An absent topology retains the legacy full-group expansion. Deploy the updated
+gateway, servicer and protobuf stubs together for endpoints that serve only a
+subset of a group. Older Python protobuf packages remain usable but cannot
+advertise this field; keep `--dp-aware` off for partitioned endpoints using
+those packages. Local development stubs can be generated with
+`grpc_servicer/scripts/gen_proto_stubs.py`.
+
+Kubernetes discovery needs no new rank annotation. It discovers each endpoint
+and reads this metadata through the normal registration workflow. This metadata
+support does not change the Rust launcher's local-group setup or provide the
+shared coordination needed for multi-node external/hybrid DP+EP.
+
+The topology uses protobuf field 27 on this branch. Field 25 is upstream
+`mm_encoder_budget`; workers built with the older custom topology at field 25
+need matching upgraded protobuf bindings.
+
 Without `--kv-events-config`, the servicer turns vLLM's ZMQ KV-event publisher
 on by itself, under either implementation, before the engine is built, at a
 port found free on the host rather than vLLM's fixed default (one per

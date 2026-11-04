@@ -700,6 +700,16 @@ impl ZmqEngineClient {
             .ok_or_else(|| tonic::Status::unavailable("no connected ZMQ engine"))
     }
 
+    /// Actual global rank identities connected to this endpoint, independent
+    /// of the distributed group's size reported in READY.
+    pub fn data_parallel_ranks(&self) -> Vec<i32> {
+        self.engines()
+            .iter()
+            .filter_map(|engine| engine.engine_id.engine_index())
+            .filter_map(|rank| i32::try_from(rank).ok())
+            .collect()
+    }
+
     /// Capture identities from every connected replica, or none if any replica
     /// has no identity. The first engine alone cannot identify a grouped worker.
     pub fn cache_trace_epochs(&self) -> Vec<String> {

@@ -9,7 +9,7 @@ use tonic::Status;
 use tracing::info;
 
 use super::{State, HEALTHY, SERVER_TYPE};
-use crate::load_report::{rank_ids, RankFigures};
+use crate::load_report::RankFigures;
 
 /// How often the engine stats line is logged (vLLM's `VLLM_LOG_STATS_INTERVAL`
 /// default).
@@ -127,11 +127,20 @@ pub(super) async fn server_info(state: &State) -> vllm::GetServerInfoResponse {
 
 fn server_facts(state: &State) -> vllm::GetServerInfoResponse {
     let ready = state.shared.ready();
-    // The ranks this servicer serves (the gateway expands the worker into
-    // that many under `--dp-aware`): the connected engines, as `GetLoads`
-    // counts them, not the handshake's figure.
-    let data_parallel_size =
-        i32::try_from(state.shared.rank_count(state.model.data_parallel_size)).unwrap_or(i32::MAX);
+    let ranks = state
+        .shared
+        .engine
+        .client
+        .get()
+        .map(|client| client.data_parallel_ranks())
+        .unwrap_or_default();
+    // Keep the global group width even when a headless core reports one;
+    // connected identities are a lower bound when the launcher did not know it.
+    let data_parallel_size = ready
+        .map(|ready| i32::try_from(ready.data_parallel_size).unwrap_or(i32::MAX))
+        .unwrap_or(1)
+        .max(state.model.data_parallel_size.max(1))
+        .max(ranks.iter().max().copied().unwrap_or(0).saturating_add(1));
     let model = &state.model;
     // Block size: the handshake's resolved figure once the engine is up, the
     // launcher's config value before that. Model dtype: the launcher's label
@@ -150,6 +159,7 @@ fn server_facts(state: &State) -> vllm::GetServerInfoResponse {
         uptime_seconds: state.shared.started.elapsed().as_secs_f64(),
         server_type: SERVER_TYPE.to_string(),
         data_parallel_size,
+        data_parallel_topology: Some(vllm::DataParallelTopology { ranks }),
         kv_connector: model.kv_connector.clone(),
         kv_role: model.kv_role.clone(),
         kv_engine_id: model.kv_engine_id.clone(),
@@ -213,8 +223,9 @@ pub(super) fn loads(state: &State) -> Result<vllm::GetLoadsResponse, Status> {
         // No output batch has carried a snapshot yet. The Python servicer
         // reports a zero-filled entry per rank, and the Router reads an
         // empty list as no report at all.
-        let ranks = state.shared.rank_count(state.model.data_parallel_size);
-        loads = rank_ids(ranks)
+        loads = client
+            .data_parallel_ranks()
+            .into_iter()
             .map(|dp_rank| {
                 // The servicer's own figures do not wait for the engine's
                 // first snapshot: what this rank cached and streamed so far,

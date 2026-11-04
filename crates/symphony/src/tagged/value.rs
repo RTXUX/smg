@@ -347,6 +347,9 @@ pub fn json(text: &str, kind: Option<Kind>) -> String {
         Some(Kind::String) => string(text),
         Some(Kind::NullableString) if NULL_WORDS.contains(&text) => "null".to_string(),
         Some(Kind::NullableString) => string(text),
+        // A valid JSON spelling already has the intended meaning. Keep it
+        // for prompt replay (notably -0); normalize only non-JSON integers.
+        Some(Kind::Integer) if reads_back_as_an_argument(text.trim()) => text.trim().to_string(),
         Some(Kind::Integer) => integer(text.trim())
             .filter(|integer| reads_back_as_an_argument(integer))
             .unwrap_or_else(|| inferred(text)),
@@ -787,7 +790,7 @@ mod tests {
             ("007", "7"),
             ("-007", "-7"),
             ("0", "0"),
-            ("-0", "0"),
+            ("-0", "-0"),
             ("000", "0"),
             // Wider than any machine integer, with a sign and zeros to remove.
             ("+9223372036854775808", "9223372036854775808"),
